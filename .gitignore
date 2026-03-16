@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Docs output
+docs/_build
+docs/_static
+
+# Code-generated or downloaded files
+*pdf
+
+# EGRET is fetched by uv from GitHub; no need to track locally
+Egret/
+
+
