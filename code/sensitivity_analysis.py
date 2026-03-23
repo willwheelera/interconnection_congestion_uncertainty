@@ -24,14 +24,17 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 from pathlib import Path
+import time
 
 import numpy as np
 import pandas as pd
 import scipy.linalg
 
 from egret.data.model_data import ModelData
+from egret.models.dcopf import solve_dcopf
 
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
@@ -115,12 +118,18 @@ def _branch_susceptance(br_data, base_mva: float) -> float:
     return -base_mva / (tau * br_data["reactance"])
 
 
-def _marginal_cost(g_data, pg_mw: float) -> float:
-    """Return marginal cost [$/MWh] at operating point pg_mw for a generator."""
+def _poly_cost_coeffs(g_data) -> tuple[float, float]:
+    """Return (a2, b1) polynomial cost coefficients for a generator."""
     cost = g_data.get("p_cost", {})
     vals = cost.get("values", {}) if cost.get("cost_curve_type") == "polynomial" else {}
     a2 = vals.get("2", vals.get(2, 0.0)) or 0.0
     b1 = vals.get("1", vals.get(1, 0.0)) or 0.0
+    return a2, b1
+
+
+def _marginal_cost(g_data, pg_mw: float) -> float:
+    """Return marginal cost [$/MWh] at operating point pg_mw for a generator."""
+    a2, b1 = _poly_cost_coeffs(g_data)
     return 2.0 * a2 * pg_mw + b1
 
 
@@ -144,14 +153,18 @@ def _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva):
     return J_pb
 
 
-def _pf_ylim(sol_k, lmp_base, name, data, eps):
-    """Return (y_upper, y_lower) barrier weights for a branch's thermal limits."""
+def _pf_ylim(sol_k, name, data, eps, pf_dual_dict):
+    """Return (y_upper, y_lower) barrier weights for a branch's thermal limits.
+
+    Dual estimates z_k are taken from pf_dual_dict (direct LP solver duals),
+    which correctly handle LP degeneracy (equal LMPs on both sides of a
+    congested line).
+    """
     val = sol_k[name].get("pf", 0.0)
     rating = data["rating_long_term"]
-    lmp_f = lmp_base.get(data["from_bus"], 0.0)
-    lmp_t = lmp_base.get(data["to_bus"], 0.0)
-    y_upper = (max(lmp_f - lmp_t, 0.0) + eps) / (max(rating - val, 0.0) + eps)
-    y_lower = (max(lmp_t - lmp_f, 0.0) + eps) / (max(val + rating, 0.0) + eps)
+    z_upper, z_lower = pf_dual_dict[name]
+    y_upper = (z_upper + eps) / (max(rating - val, 0.0) + eps)
+    y_lower = (z_lower + eps) / (max(val + rating, 0.0) + eps)
     return y_upper, y_lower
 
 def _gen_ylim(sol, lmp_base, g_name, g_data, eps):
@@ -167,6 +180,37 @@ def _gen_ylim(sol, lmp_base, g_name, g_data, eps):
     return y_max, y_min
 
 
+def _compute_mu_base(
+    md: ModelData,
+    lmp_base: dict[str, float],
+    pf_dual_dict: dict[str, tuple[float, float]],
+) -> dict[str, dict[str, float]]:
+    """Compute base dual variable values z_k at the optimal solution from KKT conditions.
+
+    Branch/DC duals are taken directly from pf_dual_dict (LP solver duals).
+    Generator duals:  z_max = max(LMP_bus − mc, 0),  z_min = max(mc − LMP_bus, 0).
+    """
+    branch_names = [n for n, _ in md.elements("branch")]
+    dc_names = [n for n, _ in md.elements("dc_branch")]
+
+    gen_max, gen_min = {}, {}
+    for g_name, g_data in md.elements("generator"):
+        pg_mw = g_data.get("pg", 0.0)
+        lmp_b = lmp_base.get(g_data["bus"], 0.0)
+        mc = _marginal_cost(g_data, pg_mw)
+        gen_max[g_name] = max(lmp_b - mc, 0.0)
+        gen_min[g_name] = max(mc - lmp_b, 0.0)
+
+    return {
+        "branch_upper": {bn: pf_dual_dict[bn][0] for bn in branch_names},
+        "branch_lower": {bn: pf_dual_dict[bn][1] for bn in branch_names},
+        "gen_max": gen_max,
+        "gen_min": gen_min,
+        "dc_max": {dn: pf_dual_dict[dn][0] for dn in dc_names},
+        "dc_min": {dn: pf_dual_dict[dn][1] for dn in dc_names},
+    }
+
+
 def _build_barrier_Y(
     orig: dict,
     sol: dict,
@@ -176,6 +220,7 @@ def _build_barrier_Y(
     base_mva: float,
     lmp_base: dict[str, float],
     eps: float,
+    pf_dual_dict: dict[str, tuple[float, float]],
 ) -> np.ndarray:
     """Build the barrier regularisation matrix Y in [θ, p_g, dcpf] variable space.
 
@@ -184,11 +229,11 @@ def _build_barrier_Y(
         Y += y_k * (∂s_k/∂x)^T (∂s_k/∂x)
 
     where s_k is the constraint slack and y_k = (z_k + ε) / (s_k + ε).  Dual values
-    z_k are derived analytically from KKT stationarity at the optimal solution:
+    z_k are recovered from the KKT reduced cost of each pf variable (see _pf_ylim).
 
     * Generator capacity: z_max = max(0, LMP_bus − mc_g), z_min = max(0, mc_g − LMP_bus)
-    * Branch thermal:     z_upper = max(0, LMP_from − LMP_to), z_lower = max(0, LMP_to − LMP_from)
-    * DC branch:          z_max = max(0, LMP_to − LMP_from), z_min = max(0, LMP_from − LMP_to)
+    * Branch thermal:     z_k from rc = (LMP_from − LMP_to) − ν  (ν from nu_dict)
+    * DC branch:          ν = 0 (no flow-equality constraint)
 
     The branch thermal contribution is a 2×2 outer product at the (θ_from, θ_to) block
     because pf_l = B_l (θ_from − θ_to) and ∂pf_l/∂θ = B_l (e_from − e_to).
@@ -206,7 +251,7 @@ def _build_barrier_Y(
         f_i = idx["bus"][br_data["from_bus"]]
         t_i = idx["bus"][br_data["to_bus"]]
         B_l = _branch_susceptance(br_data, base_mva)
-        y_upper, y_lower = _pf_ylim(sol["branch"], lmp_base, br_name, br_data, eps)
+        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps, pf_dual_dict)
         y_total = y_upper + y_lower
         # grad pf = B_l * (e_from - e_to); outer product scaled by y_total
         Y[f_i, f_i] += y_total * B_l ** 2
@@ -217,7 +262,7 @@ def _build_barrier_Y(
     for dc_name, dc_data in orig["dc"].items():
         if dc_data.get("rating_long_term") is None:
             continue
-        y_upper, y_lower = _pf_ylim(sol["dc"], lmp_base, dc_name, dc_data, eps)
+        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps, pf_dual_dict)
         d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
         Y[d_col, d_col] += y_upper + y_lower
 
@@ -234,6 +279,7 @@ def _compute_mu_sensitivity(
     lmp_base: dict[str, float],
     eps: float,
     primal_sens: np.ndarray,
+    pf_dual_dict: dict[str, tuple[float, float]],
 ) -> dict[str, pd.DataFrame]:
     """Compute inequality-constraint dual sensitivities dμ_k/dP_j.
 
@@ -262,9 +308,9 @@ def _compute_mu_sensitivity(
         dtheta_diff = primal_sens[f_i, :] - primal_sens[t_i, :]
 
         B_l = _branch_susceptance(br_data, base_mva)
-        y_upper, y_lower = _pf_ylim(sol["branch"], lmp_base, br_name, br_data, eps)
-        branch_upper[br_i, :] = y_upper * B_l * dtheta_diff
-        branch_lower[br_i, :] = -y_lower * B_l * dtheta_diff
+        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps, pf_dual_dict)
+        branch_upper[br_i, :] = -y_upper * B_l * dtheta_diff
+        branch_lower[br_i, :] =  y_lower * B_l * dtheta_diff
 
     gen_max = np.zeros((len(names["gen"]), n["bus"]))
     gen_min = np.zeros((len(names["gen"]), n["bus"]))
@@ -272,8 +318,8 @@ def _compute_mu_sensitivity(
         g_data = orig["gen"][g_name]
         y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps)
         dpg = primal_sens[n["bus"] + idx["gen"][g_name], :]
-        gen_max[g_i, :] = y_max * dpg
-        gen_min[g_i, :] = -y_min * dpg
+        gen_max[g_i, :] = -y_max * dpg
+        gen_min[g_i, :] =  y_min * dpg
 
     dc_max = np.zeros((len(names["dc"]), n["bus"]))
     dc_min = np.zeros((len(names["dc"]), n["bus"]))
@@ -283,9 +329,9 @@ def _compute_mu_sensitivity(
             continue
         d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
         ddcpf = primal_sens[d_col, :]
-        y_upper, y_lower = _pf_ylim(sol["dc"], lmp_base, dc_name, dc_data, eps)
-        dc_max[d_i, :] = y_upper * ddcpf
-        dc_min[d_i, :] = -y_lower * ddcpf
+        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps, pf_dual_dict)
+        dc_max[d_i, :] = -y_upper * ddcpf
+        dc_min[d_i, :] =  y_lower * ddcpf
 
     return {
         "branch_upper": pd.DataFrame(branch_upper, index=pd.Index(names["branch"], name="branch"), columns=col_idx),
@@ -301,6 +347,7 @@ def compute_sensitivity_barrier(
     md: ModelData,
     md_sol: ModelData,
     lmp_base: dict[str, float],
+    pf_dual_dict: dict[str, tuple[float, float]],
     eps: float = 1.0,
     d_w: float = 0.01,
     d_c: float = 0.01,
@@ -363,14 +410,11 @@ def compute_sensitivity_barrier(
     # Objective Hessian H (diagonal, non-zero only for QP generators)
     H_diag = np.zeros(n_vars)
     for g_name, g_data in orig["gen"].items():
-        cost = g_data.get("p_cost", {})
-        if cost.get("cost_curve_type") == "polynomial":
-            vals = cost.get("values", {})
-            a2 = vals.get("2", vals.get(2, 0.0)) or 0.0
-            if a2 != 0.0:
-                H_diag[n["bus"] + idx["gen"][g_name]] = 2.0 * a2
+        a2, _ = _poly_cost_coeffs(g_data)
+        if a2 != 0.0:
+            H_diag[n["bus"] + idx["gen"][g_name]] = 2.0 * a2
 
-    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps)
+    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps, pf_dual_dict)
 
     J_pb = _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva)
     J_ref = np.zeros((1, n_vars))
@@ -387,13 +431,8 @@ def compute_sensitivity_barrier(
     try:
         K_lu = scipy.linalg.lu_factor(K)
     except scipy.linalg.LinAlgError as exc:
-        print(f"  [barrier] LU factorisation failed ({exc}); returning zeros.")
-        zero_lmp = pd.DataFrame(
-            np.zeros((n["bus"], n["bus"])),
-            index=pd.Index(names["bus"], name="observed_bus (LMP_i)"),
-            columns=pd.Index(names["bus"], name="injection_bus (P_j)"),
-        )
-        return zero_lmp, {}
+        print(f"  [barrier] LU factorisation failed ({exc}).")
+        raise
 
     lmp_sens = np.zeros((n["bus"], n["bus"]))
     primal_sens = np.zeros((n_vars, n["bus"]))
@@ -411,7 +450,7 @@ def compute_sensitivity_barrier(
         columns=pd.Index(names["bus"], name="injection_bus (P_j)"),
     )
     mu_sens = _compute_mu_sensitivity(
-        orig, sol, names, idx, n, base_mva, lmp_base, eps, primal_sens
+        orig, sol, names, idx, n, base_mva, lmp_base, eps, primal_sens, pf_dual_dict
     )
     return df_lmp, mu_sens
 
@@ -421,6 +460,7 @@ def save_results(
     lmp_base: dict[str, float],
     df_lmp: pd.DataFrame,
     mu_sens: dict[str, pd.DataFrame] | None = None,
+    mu_base: dict[str, dict[str, float]] | None = None,
     **extra_fields,
 ) -> Path:
     """Save barrier sensitivity results to results/sensitivity_barrier_<case>.json.
@@ -456,9 +496,114 @@ def save_results(
             }
             for key, mu_df in mu_sens.items()
         }
+    if mu_base:
+        payload["mu_base"] = mu_base
     out_path.write_text(json.dumps(payload, indent=2))
     print(f"Results saved to {out_path}")
     return out_path
+
+
+def _dcopf_with_fixed_commitments(
+    md: ModelData, solver: str = "gurobi"
+) -> tuple[ModelData, dict[str, float], dict[str, tuple[float, float]]]:
+    """Solve DCOPF with generator commitments fixed from a UC solution.
+
+    Generators with ``commitment == 0`` are excluded by setting ``p_min = p_max = 0``.
+    The resulting DCOPF solution includes LMPs as duals of the power-balance
+    constraints, which are needed for the barrier sensitivity weights.
+
+    Also extracts:
+    - Flow-equality duals ν_l = m.dual[m.eq_pf_branch[l]] (nu_dict).
+    - Thermal-limit duals from the LP solver (pf_dual_dict), which correctly
+      recover z_upper/z_lower even under LP degeneracy (equal LMPs on both sides
+      of a congested branch).  For minimization: dual(ineq_ub) ≤ 0 at binding,
+      so z_upper = −dual(ineq_ub) ≥ 0; dual(ineq_lb) ≥ 0 at binding = z_lower.
+
+    Parameters
+    ----------
+    md:
+        ModelData extracted from a UC solution (single time step, scalar values).
+    solver:
+        Pyomo solver name.
+
+    Returns
+    -------
+    (md_sol, nu_dict, pf_dual_dict)
+        md_sol: Solved ModelData with ``lmp`` populated on each bus.
+        nu_dict: {branch_name: ν_l} flow-equality duals.
+        pf_dual_dict: {branch_name: (z_upper, z_lower)} direct LP thermal-limit duals.
+    """
+    md_dcopf = copy.deepcopy(md)
+    for _, b_data in md_dcopf.elements("bus"):
+        b_data.setdefault("vm", 1.0)
+    for _, br_data in md_dcopf.elements("branch"):
+        br_data.setdefault("resistance", 0.0)
+        br_data.setdefault("charging_susceptance", 0.0)
+    for _, g_data in md_dcopf.elements("generator"):
+        if g_data.get("commitment", 1) == 0:
+            g_data["p_min"] = 0.0
+            g_data["p_max"] = 0.0
+    md_sol, m = solve_dcopf(md_dcopf, solver=solver, solver_tee=False, return_model=True)
+    nu_dict = {bn: m.dual.get(m.eq_pf_branch[bn], 0.0) or 0.0
+               for bn in m.eq_pf_branch}
+    pf_dual_dict: dict[str, tuple[float, float]] = {}
+    if hasattr(m, "ineq_pf_branch_thermal_ub"):
+        for bn in m.ineq_pf_branch_thermal_ub:
+            z_upper = max(-(m.dual.get(m.ineq_pf_branch_thermal_ub[bn], 0.0) or 0.0), 0.0)
+            z_lower = 0.0
+            if hasattr(m, "ineq_pf_branch_thermal_lb") and bn in m.ineq_pf_branch_thermal_lb:
+                z_lower = max(m.dual.get(m.ineq_pf_branch_thermal_lb[bn], 0.0) or 0.0, 0.0)
+            pf_dual_dict[bn] = (z_upper, z_lower)
+    if hasattr(m, "dcpf"):
+        for bn in m.dcpf:
+            rc = m.rc.get(m.dcpf[bn], 0.0) or 0.0
+            pf_dual_dict[bn] = (max(-rc, 0.0), max(rc, 0.0))
+    return md_sol, nu_dict, pf_dual_dict
+
+
+def run(
+    solution_path: Path | str = DEFAULT_SOLUTION,
+    hour: int = 0,
+    solver: str = "gurobi",
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Load a solution file, compute barrier sensitivity, and save results.
+
+    Parameters
+    ----------
+    solution_path:
+        Path to a saved EGRET ModelData JSON (DCOPF or UC result).
+    hour:
+        Time index to extract when the solution contains time-series data.
+    solver:
+        Pyomo solver name used for the DCOPF re-solve when LMPs are absent.
+
+    Returns
+    -------
+    (df_lmp, mu_sens) as returned by :func:`compute_sensitivity_barrier`.
+    """
+    t0 = time.perf_counter()
+    solution_path = Path(solution_path)
+    print(f"Loading {solution_path.name}...")
+    md_raw = ModelData.read(str(solution_path))
+    md = _extract_hour(md_raw, hour)
+    print(f"  {len(dict(md.elements('bus')))} buses, hour={hour}")
+
+    print("   solving DCOPF with fixed commitments...")
+    md, nu_dict, pf_dual_dict = _dcopf_with_fixed_commitments(md, solver=solver)
+    lmp_base = _get_lmps(md)
+    print("LMPs ($/MWh):")
+    for b in sorted(lmp_base):
+        print(f"  bus {b}: {lmp_base[b]:.4f}")
+
+    print("\nComputing barrier sensitivity (LP + QP)...")
+    df_lmp, mu_sens = compute_sensitivity_barrier(
+        md, md, lmp_base, pf_dual_dict
+    )
+    mu_base = _compute_mu_base(md, lmp_base, pf_dual_dict)
+    case_stem = f"{solution_path.stem}_h{hour:02d}"
+    save_results(case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base)
+    print(f"hour {hour} solve time {time.perf_counter() - t0}")
+    return df_lmp, mu_sens
 
 
 def main():
@@ -477,30 +622,17 @@ def main():
         default=0,
         help="Time index to extract when the solution contains time-series data (default: 0).",
     )
+    parser.add_argument(
+        "--solver",
+        type=str,
+        default="gurobi",
+        help="Pyomo solver for the DCOPF re-solve (default: gurobi).",
+    )
     args = parser.parse_args()
-
-    solution_path = Path(args.solution)
-    print(f"Loading {solution_path.name}...")
-    md_raw = ModelData.read(str(solution_path))
-    md = _extract_hour(md_raw, args.hour)
-    print(f"  {len(dict(md.elements('bus')))} buses, hour={args.hour}")
-
-    lmp_base = _get_lmps(md)
-    if lmp_base:
-        print("LMPs ($/MWh):")
-        for b in sorted(lmp_base):
-            print(f"  bus {b}: {lmp_base[b]:.4f}")
-    else:
-        print("  No LMPs found in solution (UC result); barrier weights use eps only.")
-
-    print("\nComputing barrier sensitivity (LP + QP)...")
-    df_lmp, mu_sens = compute_sensitivity_barrier(md, md, lmp_base)
-    print("LMP sensitivity dLMP_i/dP_j ($/MWh per MW):")
-    print(df_lmp.to_string())
-    print("\nBranch congestion dual sensitivity dμ_upper/dP_j ($/MWh per MW):")
-    print(mu_sens["branch_upper"].to_string())
-    save_results(solution_path.stem, lmp_base, df_lmp, mu_sens=mu_sens)
+    run(solution_path=args.solution, hour=args.hour, solver=args.solver)
 
 
 if __name__ == "__main__":
-    main()
+    #main()
+    for h in range(24):
+        run(hour=h)
