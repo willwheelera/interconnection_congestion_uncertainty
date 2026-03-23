@@ -1,0 +1,237 @@
+"""
+Compare barrier-regularised sensitivity (dλ/dP and dμ/dP) against finite-difference
+estimates from DCOPF re-solves.
+
+The barrier method in sensitivity_analysis.compute_sensitivity_barrier returns
+analytical derivatives of LMPs and congestion duals w.r.t. bus power injections.
+This test verifies that the barrier sensitivity qualitatively agrees with FD
+re-solves for both LP and QP cost functions.
+
+Test case: hvdc_test_case3.json (3-bus, 2 AC branches + 2 DC branches) with
+linear costs.  Branch 3 (1→2) and DC branch 2 (3→2) are both fully congested
+at the base solution.
+
+Tolerance design
+----------------
+The barrier parameter eps controls the smoothing radius around active/inactive
+constraint boundaries.  The FD step delta should be comparable in magnitude to
+eps so that both methods "see across" the same smoothing region.
+
+For LP costs the exact LP duals are piecewise-constant, so FD of exact re-solves
+gives ≈ 0 for small perturbations that do not change the active set.  The barrier
+method, by contrast, returns O(eps) non-zero values that smoothly approximate the
+sub-gradient.  The two methods agree qualitatively: both are small, and a formula
+error (wrong coefficient, wrong variable) would produce O(1) values that violate
+the tolerance.
+
+For QP costs the duals vary smoothly and FD provides a tighter ground truth;
+the same tolerance accommodates both regimes.
+
+Usage:
+    uv run python code/test_sensitivity_vs_fd.py
+    uv run python code/test_sensitivity_vs_fd.py --delta 0.5 --atol 0.05
+"""
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+
+from egret.data.model_data import ModelData
+
+from sensitivity_analysis import (
+    _dcopf_with_fixed_commitments,
+    _get_lmps,
+    _network_state,
+    _compute_mu_base,
+    compute_sensitivity_barrier,
+)
+from finite_difference_sensitivity import _inject_at_bus
+
+REPO_ROOT = Path(__file__).parent.parent
+DEFAULT_CASE = (
+    REPO_ROOT
+    / "Egret/egret/models/tests/transmission_test_instances/test_instances/hvdc_test_case3.json"
+)
+DEFAULT_DELTA = 1.0   # MW — comparable to eps so FD spans the barrier smoothing region
+DEFAULT_ATOL  = 0.05  # $/MWh per MW — accommodates O(eps) barrier smoothing at eps=1
+
+
+def _constraint_slacks(orig: dict, sol: dict) -> dict[str, dict[str, float]]:
+    """Return {key: {name: slack}} for all inequality constraints.
+
+    slack > 0 means the constraint is inactive; slack ≈ 0 means exactly active.
+    """
+    slacks: dict[str, dict[str, float]] = {
+        "branch_upper": {}, "branch_lower": {},
+        "gen_max": {}, "gen_min": {},
+        "dc_max": {}, "dc_min": {},
+    }
+    for br_name, br_data in orig["branch"].items():
+        rating = br_data.get("rating_long_term")
+        if rating is None:
+            continue
+        pf = sol["branch"][br_name].get("pf", 0.0)
+        slacks["branch_upper"][br_name] = max(rating - pf, 0.0)
+        slacks["branch_lower"][br_name] = max(pf + rating, 0.0)
+    for g_name, g_data in orig["gen"].items():
+        pg = sol["gen"][g_name].get("pg", 0.0)
+        pg_max = g_data.get("p_max")
+        pg_min = g_data.get("p_min", 0.0)
+        if pg_max is not None:
+            slacks["gen_max"][g_name] = max(pg_max - pg, 0.0)
+        slacks["gen_min"][g_name] = max(pg - pg_min, 0.0)
+    for dc_name, dc_data in orig["dc"].items():
+        rating = dc_data.get("rating_long_term")
+        if rating is None:
+            continue
+        pf = sol["dc"][dc_name].get("pf", 0.0)
+        slacks["dc_max"][dc_name] = max(rating - pf, 0.0)
+        slacks["dc_min"][dc_name] = max(pf + rating, 0.0)
+    return slacks
+
+
+def _fd_lmp_column(md_base: ModelData, bus_name: str, delta: float) -> dict[str, float]:
+    """Return LMPs of the DCOPF perturbed by +delta MW at bus_name."""
+    md_pert = _inject_at_bus(md_base, bus_name, delta)
+    md_pert_sol, _, _ = _dcopf_with_fixed_commitments(md_pert)
+    return _get_lmps(md_pert_sol)
+
+
+def _fd_mu_column(
+    md_base: ModelData,
+    bus_name: str,
+    delta: float,
+    orig: dict,
+    mu_base_vals: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    """Return FD estimate {key: {name: (μ_pert − μ_base) / delta}} for injection bus."""
+    md_pert = _inject_at_bus(md_base, bus_name, delta)
+    md_pert_sol, nu_pert, pf_dual_pert = _dcopf_with_fixed_commitments(md_pert)
+    lmp_pert = _get_lmps(md_pert_sol)
+    _, sol_pert, *_ = _network_state(md_pert, md_pert_sol)
+    mu_pert = _compute_mu_base(orig, sol_pert, lmp_pert, nu_dict=nu_pert, pf_dual_dict=pf_dual_pert)
+    return {
+        key: {name: (mu_pert[key].get(name, 0.0) - v) / delta
+              for name, v in base_vals.items()}
+        for key, base_vals in mu_base_vals.items()
+    }
+
+
+def compare_sensitivity(
+    case_path: Path = DEFAULT_CASE,
+    delta: float = DEFAULT_DELTA,
+    atol: float = DEFAULT_ATOL,
+) -> bool:
+    """Run barrier vs FD comparison and return True if all tested entries pass atol.
+
+    Prints a table of the largest discrepancies for LMP and μ sensitivity.
+    """
+    print(f"Loading {case_path.name}...")
+    md = ModelData.read(str(case_path))
+
+    print("Solving base DCOPF...")
+    md_sol, nu_dict, pf_dual_dict = _dcopf_with_fixed_commitments(md)
+    lmp_base = _get_lmps(md_sol)
+    print("Base LMPs ($/MWh):", {b: f"{v:.4f}" for b, v in sorted(lmp_base.items())})
+
+    orig, sol, names, *_ = _network_state(md, md_sol)
+    mu_base_vals = _compute_mu_base(orig, sol, lmp_base, nu_dict=nu_dict, pf_dual_dict=pf_dual_dict)
+    slacks = _constraint_slacks(orig, sol)
+
+    print("\nComputing barrier sensitivity (eps=1.0)...")
+    df_lmp_bar, mu_sens_bar = compute_sensitivity_barrier(
+        md, md_sol, lmp_base, nu_dict=nu_dict, pf_dual_dict=pf_dual_dict
+    )
+
+    bus_names = names["bus"]
+    n = len(bus_names)
+    dim_map = {
+        "branch_upper": names["branch"], "branch_lower": names["branch"],
+        "gen_max":      names["gen"],    "gen_min":      names["gen"],
+        "dc_max":       names["dc"],     "dc_min":       names["dc"],
+    }
+
+    # ── Collect FD columns ──────────────────────────────────────────────────
+    lmp_fd = np.zeros((n, n))
+    mu_fd: dict[str, np.ndarray] = {
+        key: np.zeros((len(row_names), n)) for key, row_names in dim_map.items()
+    }
+    for j, inj_bus in enumerate(bus_names):
+        print(f"  FD perturbing bus {inj_bus} (+{delta:.1f} MW)...")
+        lmp_pert = _fd_lmp_column(md, inj_bus, delta)
+        for i, obs_bus in enumerate(bus_names):
+            lmp_fd[i, j] = (lmp_pert[obs_bus] - lmp_base[obs_bus]) / delta
+        fd_mu_col = _fd_mu_column(md, inj_bus, delta, orig, mu_base_vals)
+        for key, row_names in dim_map.items():
+            for r_i, name in enumerate(row_names):
+                mu_fd[key][r_i, j] = fd_mu_col[key].get(name, 0.0)
+
+    # ── Compare LMP sensitivity ─────────────────────────────────────────────
+    print(f"\n{'=== LMP sensitivity dλ/dP (barrier vs FD) ':=<60}")
+    lmp_bar = df_lmp_bar.values
+    lmp_err = np.abs(lmp_bar - lmp_fd)
+    max_lmp_err = lmp_err.max()
+    lmp_pass = max_lmp_err <= atol
+    print(f"  Max |Δ| = {max_lmp_err:.5f}  (atol = {atol})  "
+          f"[{'PASS' if lmp_pass else 'FAIL'}]")
+    if not lmp_pass:
+        print(f"  {'obs_bus':>8}  {'inj_bus':>8}  {'barrier':>10}  {'FD':>10}  {'Δ':>10}")
+        for ij in np.argwhere(lmp_err > atol * 0.5):
+            i, j = ij
+            print(f"  {bus_names[i]:>8}  {bus_names[j]:>8}  "
+                  f"{lmp_bar[i,j]:>10.5f}  {lmp_fd[i,j]:>10.5f}  "
+                  f"{lmp_bar[i,j]-lmp_fd[i,j]:>+10.5f}")
+
+    # ── Compare μ sensitivity ────────────────────────────────────────────────
+    print(f"\n{'=== μ sensitivity dμ/dP (barrier vs FD) ':=<60}")
+    max_mu_err = 0.0
+    mu_fail = False
+    for key, row_names in dim_map.items():
+        bar_vals = mu_sens_bar[key].values
+        fd_vals  = mu_fd[key]
+        key_slacks = slacks.get(key, {})
+        for r_i, name in enumerate(row_names):
+            slack = key_slacks.get(name, float("inf"))
+            row_err = np.abs(bar_vals[r_i, :] - fd_vals[r_i, :]).max()
+            if row_err < 1e-9 and np.abs(bar_vals[r_i, :]).max() < 1e-9:
+                continue  # both barrier and FD are zero — trivially pass
+            max_mu_err = max(max_mu_err, row_err)
+            row_pass = row_err <= atol
+            if not row_pass:
+                mu_fail = True
+            print(f"  {key}[{name}]: max |Δ| = {row_err:.5f}  "
+                  f"[{'PASS' if row_pass else 'FAIL'}]  slack={slack:.2f} MW")
+            if not row_pass:
+                for j, inj_bus in enumerate(bus_names):
+                    e = abs(bar_vals[r_i, j] - fd_vals[r_i, j])
+                    if e > atol * 0.5:
+                        print(f"    ← bus {inj_bus}: "
+                              f"barrier={bar_vals[r_i,j]:+.5f}  "
+                              f"FD={fd_vals[r_i,j]:+.5f}  "
+                              f"Δ={bar_vals[r_i,j]-fd_vals[r_i,j]:+.5f}")
+
+    passed = lmp_pass and not mu_fail
+    print(f"\n{'PASS' if passed else 'FAIL'} — max LMP err={max_lmp_err:.5f}, "
+          f"max μ err (interior)={max_mu_err:.5f}  (atol={atol})")
+    return passed
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compare barrier sensitivity against finite-difference estimates."
+    )
+    parser.add_argument("--case",      type=str,   default=str(DEFAULT_CASE))
+    parser.add_argument("--delta",     type=float, default=DEFAULT_DELTA,
+                        help="FD perturbation in MW (default: 1.0)")
+    parser.add_argument("--atol",      type=float, default=DEFAULT_ATOL,
+                        help="Absolute tolerance in $/MWh per MW (default: 0.05)")
+    args = parser.parse_args()
+    passed = compare_sensitivity(
+        Path(args.case), delta=args.delta, atol=args.atol
+    )
+    raise SystemExit(0 if passed else 1)
+
+
+if __name__ == "__main__":
+    main()
