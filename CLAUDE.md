@@ -28,6 +28,7 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 ### Code Style
 - Each file implements one idea. Different approaches are implemented in different files. Calculation, post-processing, and plotting are all implemented in separate files.
 - Functions are preferred to be around 50 lines long. Longer functions are discouraged, when possible.
+- Do not plan for every possible case. If arguments do not conform to expectations, allow the program to error out instead of providing backup options. This makes code more direct, concise, and readable.
 
 ## EGRET Library Overview
 
@@ -48,7 +49,10 @@ EGRET (`Egret/egret/`) provides:
 
 ## Development Testing
 
-When testing code during development, avoid multiline shell arguments containing a quoted newline followed by a `#` comment line. Temporarily remove commented lines from the code snippet for these tests.
+When testing code during development: 
+- Do not run commands that contain a quoted newline followed by a #-prefixed line
+- Temporarily remove commented lines from the code snippet for these tests, to avoid unnecessary "This command requires approval" bottlenecks
+
 
 ## Running EGRET Tests
 
