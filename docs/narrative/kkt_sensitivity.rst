@@ -404,15 +404,84 @@ f^{\text{DC}})`, each contribution is a rank-1 (or diagonal) block:
 
 * **DC branch bounds** — diagonal, analogous to generator capacity.
 
-Dual values are computed analytically from KKT stationarity at the optimal
-solution without re-solving:
+Dual values :math:`z_k` are recovered from KKT stationarity at the optimal
+solution.
+
+**Generator capacity** — from stationarity of the objective with respect to
+:math:`p_g`:
 
 .. math::
 
-   z_{\max,g} &= \max(0,\; \lambda_{\text{bus}(g)} - c_g'(p_g)) \\
-   z_{\min,g} &= \max(0,\; c_g'(p_g) - \lambda_{\text{bus}(g)}) \\
-   z_{\text{upper},l} &= \max(0,\; \lambda_{\text{from}(l)} - \lambda_{\text{to}(l)}) \\
-   z_{\text{lower},l} &= \max(0,\; \lambda_{\text{to}(l)} - \lambda_{\text{from}(l)})
+   z_{\max,g} &= \max\!\bigl(0,\; \lambda_{\text{bus}(g)} - c_g'(p_g)\bigr) \\
+   z_{\min,g} &= \max\!\bigl(0,\; c_g'(p_g) - \lambda_{\text{bus}(g)}\bigr)
+
+**Branch thermal** — EGRET's B-theta DCOPF introduces an explicit power-flow
+variable :math:`f_l` with a flow-equality constraint
+
+.. math::
+
+   f_l = B_l (\theta_{\text{from}(l)} - \theta_{\text{to}(l)})
+   \quad\text{(FEQ}_l\text{)}
+
+with thermal bounds :math:`-F_l \le f_l \le F_l` enforced as variable bounds
+on :math:`f_l`.  Let :math:`\nu_l` denote the dual of (FEQ\ :math:`_l`).
+KKT stationarity for :math:`f_l` gives the *reduced cost*
+
+.. math::
+
+   \mathrm{rc}_l
+   \;=\; (\lambda_{\text{from}(l)} - \lambda_{\text{to}(l)}) - \nu_l
+
+The reduced cost is non-negative when the lower bound is active and
+non-positive when the upper bound is active, so
+
+.. math::
+
+   z_{\text{lower},l} &= \max(0,\;\mathrm{rc}_l) \\
+   z_{\text{upper},l} &= \max(0,\;-\mathrm{rc}_l)
+
+:math:`\nu_l` is extracted directly from the solved Pyomo model:
+
+.. code-block:: python
+
+   nu_l = m.dual[m.eq_pf_branch[l]]   # flow-equality dual ($/MWh)
+
+and passed into :func:`_pf_ylim` and :func:`_compute_mu_base` via
+``nu_dict``.
+
+Why ν_l Cannot Be Omitted
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A naive approximation sets :math:`\nu_l = 0`, giving
+
+.. math::
+
+   z_{\text{upper},l}^{\text{naive}} &= \max(0,\; \lambda_{\text{from}(l)} - \lambda_{\text{to}(l)}) \\
+   z_{\text{lower},l}^{\text{naive}} &= \max(0,\; \lambda_{\text{to}(l)} - \lambda_{\text{from}(l)})
+
+This approximation has two systematic errors in a meshed network:
+
+1. **Wrong direction.** When branch :math:`l` is at its lower bound
+   (reverse flow at its limit), the congestion is attributed to the upper
+   bound if :math:`\lambda_{\text{from}} > \lambda_{\text{to}}`.  LMP
+   differences reflect contributions from *all* congested branches via the
+   PTDF matrix and do not uniquely identify which bound is active on a
+   given branch.
+
+2. **Wrong magnitude.** The true reduced cost is
+   :math:`\mathrm{rc}_l = (\lambda_{\text{from}} - \lambda_{\text{to}}) - \nu_l`;
+   omitting :math:`\nu_l` under-estimates (or over-estimates) :math:`z_k`
+   by :math:`|\nu_l|`.
+
+3. **False positives.** In a meshed network an uncongested branch can carry
+   a non-zero LMP difference because congestion elsewhere propagates price
+   signals through the network.  The naive formula assigns a non-zero
+   :math:`z_k` to such branches, inflating their barrier weights.
+
+Additionally, LP solvers (including Gurobi's simplex) can return a
+*dual-degenerate* solution where the constraint dual is zero even when the
+constraint is active, making it impossible to infer :math:`z_k` from the
+raw solver dual of the named inequality constraint.
 
 The Regularised Bordered System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -531,6 +600,9 @@ The table below maps each mathematical object to its code counterpart.
 Numerical Verification
 -----------------------
 
+LMP sensitivity (dλ/dP)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
 For QP problems the KKT and finite-difference results agree to machine
 precision when the perturbation :math:`\delta P` is small (finite-difference
 error is :math:`O(\delta P)`).  The finite-difference script uses the default
@@ -546,3 +618,45 @@ when running a QP cross-check.
 
 See :mod:`finite_difference_sensitivity` for details on the finite-difference
 implementation, and :mod:`plot_sensitivity` for side-by-side comparison plots.
+
+Barrier weight accuracy (z_k vs. solver reduced costs)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The script ``code/test_mu_consistency.py`` checks that the dual estimates
+:math:`z_k` used as barrier weights match the true thermal-limit shadow
+prices returned by Gurobi.
+
+For each AC branch it computes:
+
+* **Analytical** — :math:`z_{\text{upper},l}` and :math:`z_{\text{lower},l}`
+  from :func:`_compute_mu_base` using the flow-equality duals ``nu_dict``.
+* **Solver RC** — the reduced cost of the :math:`f_l` variable extracted via
+  a Pyomo ``rc`` suffix.  Gurobi is run with ``Method=2, Crossover=0``
+  (barrier without crossover) to avoid LP dual degeneracy.
+
+The two should agree to floating-point precision because both use the same
+solved DCOPF.  To run the test::
+
+   uv run python code/test_mu_consistency.py
+   uv run python code/test_mu_consistency.py --hour 18
+
+Expected output (the only branch with a non-zero shadow price is shown):
+
+.. code-block:: text
+
+   Branch                 Ana upper    RC upper     Δ upper   Ana lower    RC lower     Δ lower   pf/rating
+   A27                       0.0000      0.0000     +0.0000      0.6991      0.6991     -0.0000      -0.717
+   Max |Δ|: 0.0000 $/MWh
+   PASS
+
+The test also demonstrates three key properties:
+
+* Only branches at their thermal limit (``|pf/rating| ≈ 1``) have non-zero
+  reduced costs.  Uncongested branches have zero RC regardless of their LMP
+  difference — the naive formula without :math:`\nu_l` incorrectly assigns
+  non-zero weights to them.
+* The correct bound is identified: branch A27 is at its *lower* limit
+  (``pf/rating ≈ −1``) and :math:`z_{\text{lower}}` is non-zero.
+* The magnitude includes the :math:`\nu_l` correction: the shadow price
+  (0.6991 $/MWh) differs from the bare LMP difference (0.497 $/MWh) by
+  exactly :math:`|\nu_{A27}| = 0.202` $/MWh.
