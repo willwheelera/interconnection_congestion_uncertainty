@@ -15,6 +15,7 @@ Usage:
 import argparse
 import copy
 from pathlib import Path
+import numpy as np
 
 import pyomo.environ as pe
 
@@ -173,5 +174,23 @@ def main():
     print(f"\nResults saved to {out}")
 
 
+def run(solver="gurobi", prob=0.6):
+    np.random.seed(2)
+    case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
+    md = ModelData.read(str(case_path))
+    availability = np.random.random(len(md.data["elements"]["generator"])) < prob
+    #availability = np.array(list(map(int, np.binary_repr(42924))))
+
+    availability = availability.astype(int)
+    remove_unavailable_generators(md, availability)
+    md_uc = solve_uc(md, solver=solver)
+
+    print("Re-solving with fixed commitments for LP duals...")
+    md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
+    out = result_path(case_path, availability)
+    md_sol.write(str(out))
+    print(f"\nResults saved to {out}")
+
+    
 if __name__ == "__main__":
-    main()
+    run()
