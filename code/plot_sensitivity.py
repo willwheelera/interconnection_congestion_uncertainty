@@ -308,8 +308,8 @@ if __name__ == "__main__":
     #main()
     for h in [18, 20]:#range(24):
         #fname = f"../results/sensitivity_barrier_uc_test_scuc_masked_h{h:02d}.json"
-        fname = f"../results/sensitivity_barrier_uc_three_bus_uc_h{h:02d}.json"
+        #fname = f"../results/sensitivity_barrier_uc_three_bus_uc_h{h:02d}.json"
+        fname = f"../results/sensitivity_barrier_uc_many_gen_four_bus_uc_avail42924_h{h:02d}.json"
         out_path = Path(fname).with_suffix(".pdf")
         data = load_results(Path(fname))
         plot_sensitivity([data], out_path)
-        quit()
