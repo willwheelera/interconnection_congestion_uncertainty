@@ -533,7 +533,7 @@ def run(
     n_hours = len(md_raw.data["system"]["time_keys"])
     print(f"  {n_buses} buses, {n_hours} hours")
 
-    for hour in range(n_hours):
+    for hour in [18, 20]:#range(n_hours):
         t1 = time.perf_counter()
         md_h = _extract_hour(md_raw, hour)
         for _, g_data in md_h.elements("generator"):
