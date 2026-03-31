@@ -2,14 +2,14 @@ import numpy as np
 import copy
 import json
 
-LOAD_PROFILE = 2 * np.array([
+LOAD_PROFILE = 1 * np.array([
     168.0, 154.0, 145.6, 140.0, 145.6, 162.4,
     187.6, 215.6, 243.6, 254.8, 260.4, 263.2,
     257.6, 249.2, 243.6, 246.4, 257.6, 271.6,
     280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
 ])
 
-def line_model(bus_fr, bus_to, rating=350., angle_lim=90, **kwargs):
+def line_model(bus_fr, bus_to, rating=400., angle_lim=90, **kwargs):
     d = {
         "from_bus": bus_fr, "to_bus": bus_to, "reactance": 0.002, 
         "in_service": True, "branch_type": "line", 
@@ -105,6 +105,7 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
     d = G_DEFAULT.copy()
     d.update(copy.deepcopy(gtype))
 
+    d["bus"] = bus
     d["ramp_up_60min"] = d["ramp_down_60min"] = ramp * p_max
     d["startup_capacity"] = d["shutdown_capacity"] = start_capacity * p_max
     for i, s in enumerate(d["startup_cost"]):
@@ -114,12 +115,14 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
         d["p_cost"]["values"][i] = [v0, v[1] * v0]
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
+    d["initial_status"] = d["min_up_time"]
+    d["initial_p_output"] = d["p_min"]
 
     return d
     
 gen_list = []
 for i in range(4):
-    gen_list.append([
+    gen_list.extend([
       generator_model("Bus1", 400.0, G_TYPE1, ramp=0.2),
       generator_model("Bus2", 200.0, G_TYPE2),
       generator_model("Bus3", 100.0, G_TYPE3, p_min=0.2, ramp=1.0, startup_capacity=0.2),
@@ -139,8 +142,9 @@ og_dict = {
       "L23": line_model("Bus2", "Bus3", rating=200.),
       "L34": line_model("Bus3", "Bus4", rating=200.),
       "L41": line_model("Bus4", "Bus1", rating=200.),
+      "L13": line_model("Bus1", "Bus3", rating=150.),
     },
-    "generator": {f"G{i}": g for i, g in enumerate(gen_list)},
+    "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
       "Load2": {
         "bus": "Bus2",
