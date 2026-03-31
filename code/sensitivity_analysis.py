@@ -20,11 +20,9 @@ Saves results to results/sensitivity_barrier_<case>.json.
 Usage:
     uv run python code/sensitivity_analysis.py
     uv run python code/sensitivity_analysis.py --solution path/to/solution.json
-    uv run python code/sensitivity_analysis.py --solution path/to/solution.json --hour 12
 """
 
 import argparse
-import copy
 import json
 from pathlib import Path
 import time
@@ -34,7 +32,6 @@ import pandas as pd
 import scipy.linalg
 
 from egret.data.model_data import ModelData
-from egret.models.dcopf import solve_dcopf
 
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
@@ -349,8 +346,8 @@ def compute_sensitivity_barrier(
     lmp_base: dict[str, float],
     pf_dual_dict: dict[str, tuple[float, float]],
     eps: float = 1.0,
-    d_w: float = 0.01,
-    d_c: float = 0.01,
+    d_w: float = 1e-6,
+    d_c: float = 1e-6,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Compute LMP and congestion-dual sensitivity via the barrier-regularised KKT system.
 
@@ -503,107 +500,58 @@ def save_results(
     return out_path
 
 
-def _dcopf_with_fixed_commitments(
-    md: ModelData, solver: str = "gurobi"
-) -> tuple[ModelData, dict[str, float], dict[str, tuple[float, float]]]:
-    """Solve DCOPF with generator commitments fixed from a UC solution.
+def _read_pf_dual_dict(md_h: ModelData) -> dict[str, tuple[float, float]]:
+    """Read (mu_upper, mu_lower) per branch from a single-hour ModelData.
 
-    Generators with ``commitment == 0`` are excluded by setting ``p_min = p_max = 0``.
-    The resulting DCOPF solution includes LMPs as duals of the power-balance
-    constraints, which are needed for the barrier sensitivity weights.
-
-    Also extracts:
-    - Flow-equality duals ν_l = m.dual[m.eq_pf_branch[l]] (nu_dict).
-    - Thermal-limit duals from the LP solver (pf_dual_dict), which correctly
-      recover z_upper/z_lower even under LP degeneracy (equal LMPs on both sides
-      of a congested branch).  For minimization: dual(ineq_ub) ≤ 0 at binding,
-      so z_upper = −dual(ineq_ub) ≥ 0; dual(ineq_lb) ≥ 0 at binding = z_lower.
-
-    Parameters
-    ----------
-    md:
-        ModelData extracted from a UC solution (single time step, scalar values).
-    solver:
-        Pyomo solver name.
-
-    Returns
-    -------
-    (md_sol, nu_dict, pf_dual_dict)
-        md_sol: Solved ModelData with ``lmp`` populated on each bus.
-        nu_dict: {branch_name: ν_l} flow-equality duals.
-        pf_dual_dict: {branch_name: (z_upper, z_lower)} direct LP thermal-limit duals.
+    Expects ``mu_upper`` and ``mu_lower`` scalar fields on each branch,
+    as stored by ``solve_uc.solve_dcopf_with_fixed_commitments``.
     """
-    md_dcopf = copy.deepcopy(md)
-    for _, b_data in md_dcopf.elements("bus"):
-        b_data.setdefault("vm", 1.0)
-    for _, br_data in md_dcopf.elements("branch"):
-        br_data.setdefault("resistance", 0.0)
-        br_data.setdefault("charging_susceptance", 0.0)
-    for _, g_data in md_dcopf.elements("generator"):
-        if g_data.get("commitment", 1) == 0:
-            g_data["p_min"] = 0.0
-            g_data["p_max"] = 0.0
-    md_sol, m = solve_dcopf(md_dcopf, solver=solver, solver_tee=False, return_model=True)
-    nu_dict = {bn: m.dual.get(m.eq_pf_branch[bn], 0.0) or 0.0
-               for bn in m.eq_pf_branch}
-    pf_dual_dict: dict[str, tuple[float, float]] = {}
-    if hasattr(m, "ineq_pf_branch_thermal_ub"):
-        for bn in m.ineq_pf_branch_thermal_ub:
-            z_upper = max(-(m.dual.get(m.ineq_pf_branch_thermal_ub[bn], 0.0) or 0.0), 0.0)
-            z_lower = 0.0
-            if hasattr(m, "ineq_pf_branch_thermal_lb") and bn in m.ineq_pf_branch_thermal_lb:
-                z_lower = max(m.dual.get(m.ineq_pf_branch_thermal_lb[bn], 0.0) or 0.0, 0.0)
-            pf_dual_dict[bn] = (z_upper, z_lower)
-    if hasattr(m, "dcpf"):
-        for bn in m.dcpf:
-            rc = m.rc.get(m.dcpf[bn], 0.0) or 0.0
-            pf_dual_dict[bn] = (max(-rc, 0.0), max(rc, 0.0))
-    return md_sol, nu_dict, pf_dual_dict
+    return {
+        bn: (bd.get("mu_upper", 0.0), bd.get("mu_lower", 0.0))
+        for bn, bd in md_h.elements("branch")
+    }
 
 
 def run(
     solution_path: Path | str = DEFAULT_SOLUTION,
-    hour: int = 0,
-    solver: str = "gurobi",
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Load a solution file, compute barrier sensitivity, and save results.
+) -> None:
+    """Load a UC solution with pre-computed duals and compute sensitivity.
+
+    Expects the solution file to contain ``lmp``, ``mu_upper``, ``mu_lower``
+    fields (as produced by ``solve_uc.py``).
 
     Parameters
     ----------
     solution_path:
-        Path to a saved EGRET ModelData JSON (DCOPF or UC result).
-    hour:
-        Time index to extract when the solution contains time-series data.
-    solver:
-        Pyomo solver name used for the DCOPF re-solve when LMPs are absent.
-
-    Returns
-    -------
-    (df_lmp, mu_sens) as returned by :func:`compute_sensitivity_barrier`.
+        Path to a saved EGRET ModelData JSON (UC result with duals).
     """
     t0 = time.perf_counter()
     solution_path = Path(solution_path)
     print(f"Loading {solution_path.name}...")
     md_raw = ModelData.read(str(solution_path))
-    md = _extract_hour(md_raw, hour)
-    print(f"  {len(dict(md.elements('bus')))} buses, hour={hour}")
+    n_buses = len(dict(md_raw.elements("bus")))
+    n_hours = len(md_raw.data["system"]["time_keys"])
+    print(f"  {n_buses} buses, {n_hours} hours")
 
-    print("   solving DCOPF with fixed commitments...")
-    md, nu_dict, pf_dual_dict = _dcopf_with_fixed_commitments(md, solver=solver)
-    lmp_base = _get_lmps(md)
-    print("LMPs ($/MWh):")
-    for b in sorted(lmp_base):
-        print(f"  bus {b}: {lmp_base[b]:.4f}")
-
-    print("\nComputing barrier sensitivity (LP + QP)...")
-    df_lmp, mu_sens = compute_sensitivity_barrier(
-        md, md, lmp_base, pf_dual_dict
-    )
-    mu_base = _compute_mu_base(md, lmp_base, pf_dual_dict)
-    case_stem = f"{solution_path.stem}_h{hour:02d}"
-    save_results(case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base)
-    print(f"hour {hour} solve time {time.perf_counter() - t0}")
-    return df_lmp, mu_sens
+    for hour in range(n_hours):
+        t1 = time.perf_counter()
+        md_h = _extract_hour(md_raw, hour)
+        for _, g_data in md_h.elements("generator"):
+            if g_data.get("commitment", 1) == 0:
+                g_data["p_min"] = 0.0
+                g_data["p_max"] = 0.0
+        lmp_base = _get_lmps(md_h)
+        pf_dual_dict = _read_pf_dual_dict(md_h)
+        branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
+        branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}
+        df_lmp, mu_sens = compute_sensitivity_barrier(md_h, md_h, lmp_base, pf_dual_dict)
+        mu_base = _compute_mu_base(md_h, lmp_base, pf_dual_dict)
+        case_stem = f"{solution_path.stem}_h{hour:02d}"
+        save_results(
+            case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base,
+            branch_pf=branch_pf, branch_rating=branch_rating,
+        )
+        print(f"hour {hour} sensitivity {time.perf_counter() - t1:.1f}s")
 
 
 def main():
@@ -614,25 +562,11 @@ def main():
         "--solution",
         type=str,
         default=str(DEFAULT_SOLUTION),
-        help="Path to a saved EGRET ModelData JSON solution file.",
-    )
-    parser.add_argument(
-        "--hour",
-        type=int,
-        default=0,
-        help="Time index to extract when the solution contains time-series data (default: 0).",
-    )
-    parser.add_argument(
-        "--solver",
-        type=str,
-        default="gurobi",
-        help="Pyomo solver for the DCOPF re-solve (default: gurobi).",
+        help="Path to a saved EGRET ModelData JSON solution file (with duals from solve_uc.py).",
     )
     args = parser.parse_args()
-    run(solution_path=args.solution, hour=args.hour, solver=args.solver)
+    run(solution_path=args.solution)
 
 
 if __name__ == "__main__":
-    #main()
-    for h in range(24):
-        run(hour=h)
+    main()

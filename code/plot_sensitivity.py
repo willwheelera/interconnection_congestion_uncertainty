@@ -77,10 +77,6 @@ def _draw_heatmap(ax, values: np.ndarray, bus_names: list[str], title: str, xlab
 _MU_LABELS = {
     "branch_upper": r"Branch upper $\partial\mu^+_\ell/\partial P$",
     "branch_lower": r"Branch lower $\partial\mu^-_\ell/\partial P$",
-    "gen_max":      r"Gen max $\partial\mu^+_g/\partial P$",
-    "gen_min":      r"Gen min $\partial\mu^-_g/\partial P$",
-    "dc_max":       r"DC max $\partial\mu^+_{dc}/\partial P$",
-    "dc_min":       r"DC min $\partial\mu^-_{dc}/\partial P$",
 }
 
 
@@ -310,8 +306,9 @@ def main():
 
 if __name__ == "__main__":
     #main()
-    for h in [18]:#range(24):
-        fname = f"../results/sensitivity_barrier_uc_test_scuc_masked_h{h:02d}.json"
+    for h in [18, 20]:#range(24):
+        #fname = f"../results/sensitivity_barrier_uc_test_scuc_masked_h{h:02d}.json"
+        fname = f"../results/sensitivity_barrier_uc_three_bus_uc_h{h:02d}.json"
         out_path = Path(fname).with_suffix(".pdf")
         data = load_results(Path(fname))
         plot_sensitivity([data], out_path)

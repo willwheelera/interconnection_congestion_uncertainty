@@ -1,11 +1,12 @@
 """
 Plot optimal primal and dual variables from a UC solution against time.
 
-Three panels:
+Four panels:
   1. Generation dispatch (MW) — stacked area chart by fuel type
   2. Power-balance duals λ (LMP, $/MWh) — one line per bus
   3. Branch congestion duals μ ($/MWh) — one line per branch;
      positive = upper limit binding, negative = lower limit binding
+  4. Line limit slack (MW) — rating − |pf| per branch; zero = congested
 
 Usage:
     uv run python code/plot_optimal_values.py
@@ -71,33 +72,67 @@ def load_generator_metadata(solution_path: Path) -> pd.DataFrame:
 
 
 def load_lmp_mu(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load per-hour LMP and branch congestion duals from sensitivity result files.
+    """Load per-hour LMP and branch congestion duals from the UC solution file.
+
+    Reads ``lmp`` from bus elements and ``mu_upper`` / ``mu_lower`` from branch
+    elements (stored by ``solve_uc.py``).
 
     Returns:
         lmp_df  — (n_hours × n_buses) DataFrame of λ ($/MWh)
         mu_df   — (n_hours × n_branches) DataFrame of μ ($/MWh),
                   positive = upper limit binding, negative = lower binding
     """
-    stem = solution_path.stem
-    lmp_rows: dict[int, dict] = {}
-    mu_rows: dict[int, dict] = {}
+    raw = json.loads(solution_path.read_text())
+    n_hours = len(raw["system"]["time_keys"])
+    buses = raw["elements"]["bus"]
+    branches = raw["elements"]["branch"]
 
-    for h in range(24):
-        fpath = RESULTS_DIR / f"sensitivity_barrier_{stem}_h{h:02d}.json"
-        if not fpath.exists():
+    lmp_data = {}
+    for name, b in buses.items():
+        lmp = b.get("lmp")
+        if lmp is None:
             continue
-        data = json.loads(fpath.read_text())
-        lmp_rows[h] = data.get("lmp_base", {})
-        mu_base = data.get("mu_base", {})
-        if mu_base:
-            upper = mu_base.get("branch_upper", {})
-            lower = mu_base.get("branch_lower", {})
-            branches = sorted(set(upper) | set(lower))
-            mu_rows[h] = {br: upper.get(br, 0.0) - lower.get(br, 0.0) for br in branches}
+        lmp_data[name] = lmp["values"] if isinstance(lmp, dict) else [float(lmp)] * n_hours
 
-    lmp_df = pd.DataFrame.from_dict(lmp_rows, orient="index").sort_index()
-    mu_df = pd.DataFrame.from_dict(mu_rows, orient="index").sort_index()
+    mu_data = {}
+    for name, br in branches.items():
+        mu_u = br.get("mu_upper")
+        mu_l = br.get("mu_lower")
+        if mu_u is None or mu_l is None:
+            continue
+        upper = mu_u["values"] if isinstance(mu_u, dict) else [float(mu_u)] * n_hours
+        lower = mu_l["values"] if isinstance(mu_l, dict) else [float(mu_l)] * n_hours
+        mu_data[name] = [u - l for u, l in zip(upper, lower)]
+
+    lmp_df = pd.DataFrame(lmp_data, index=range(n_hours))
+    mu_df = pd.DataFrame(mu_data, index=range(n_hours))
     return lmp_df, mu_df
+
+
+def load_branch_slacks(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (slack_df, pf_df) from the UC solution file.
+
+    slack = rating − |pf| per branch per hour (MW); zero = congested.
+    """
+    raw = json.loads(solution_path.read_text())
+    n_hours = len(raw["system"]["time_keys"])
+    branches = raw["elements"]["branch"]
+
+    pf_data = {}
+    slack_data = {}
+    for name, br in branches.items():
+        pf = br.get("pf")
+        if pf is None:
+            continue
+        pf_vals = pf["values"] if isinstance(pf, dict) else [float(pf)] * n_hours
+        pf_data[name] = pf_vals
+        rating = br.get("rating_long_term")
+        if rating is not None:
+            slack_data[name] = [rating - abs(v) for v in pf_vals]
+
+    pf_df = pd.DataFrame(pf_data, index=range(n_hours))
+    slack_df = pd.DataFrame(slack_data, index=range(n_hours))
+    return slack_df, pf_df
 
 
 def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]:
@@ -111,21 +146,40 @@ def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]
     return result
 
 
-def plot_optimal_values(solution_path: Path, out_path: Path) -> None:
+def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) -> None:
     pg_df = load_pg(solution_path)
     meta = load_generator_metadata(solution_path)
     lmp_df, mu_df = load_lmp_mu(solution_path)
+    slack_df, pf_df = load_branch_slacks(solution_path)
+    print(lmp_df)
+    print(mu_df)
+    print(slack_df)
+    print(pf_df)
 
     hours = np.arange(len(pg_df))
     pg_by_fuel = _pg_by_fuel(pg_df, meta)
 
-    fig, axes = plt.subplots(3, 1, figsize=(8, 5), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(8, 7), sharex=True)
 
     # ---- Panel 1: generation dispatch (stacked area) ----
     ax_pg = axes[0]
-    labels = list(pg_by_fuel.keys())
-    values = np.array([pg_by_fuel[lab].reindex(hours, fill_value=0.0).values for lab in labels])
-    colors = [FUEL_COLORS.get(lab, "grey") for lab in labels]
+    _f = lambda x: x.reindex(hours, fill_value=0.0).values
+    def _color_f(x):
+        theta = x * np.pi * 2
+        a = np.arange(3) * 2 * np.pi / 3
+        b = np.cos(a + theta) * 0.5 + 0.5
+        return tuple(b)
+
+    if by_fuel_type:
+        labels = list(pg_by_fuel.keys())
+        values = np.array([_f(pg_by_fuel[lab]) for lab in labels])
+        colors = [FUEL_COLORS.get(lab, "grey") for lab in labels]
+    else:
+        labels = list(pg_df.columns)
+        values = np.array([_f(pg_df[lab]) for lab in labels])
+        n = len(labels)
+        colors = [_color_f(i/n) for i in range(n)]
+        
     ax_pg.stackplot(hours, values, labels=labels, colors=colors, alpha=0.85)
     ax_pg.set_ylabel("Dispatch (MW)")
     ax_pg.set_title("Generation dispatch by fuel type")
@@ -164,18 +218,31 @@ def plot_optimal_values(solution_path: Path, out_path: Path) -> None:
         ax_mu.axhline(0, color="grey", linewidth=0.5, linestyle=":")
     ax_mu.set_ylabel("μ ($/MWh)")
     ax_mu.set_title("Branch congestion dual (+ = upper limit, − = lower limit)")
-    ax_mu.set_xlabel("Hour")
-    ax_mu.set_xticks(hours)
+
+    # ---- Panel 4: line limit slack = rating - |pf| ----
+    ax_slack = axes[3]
+    if not slack_df.empty:
+        cmap3 = plt.colormaps["tab10"].resampled(max(len(slack_df.columns), 1))
+        for i, br in enumerate(slack_df.columns):
+            ax_slack.plot(slack_df.index, slack_df[br], color=cmap3(i),
+                          linewidth=1.2, marker="o", markersize=3, label=br)
+        ax_slack.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.6)
+        ax_slack.legend(loc="upper left", bbox_to_anchor=(1.01, 1),
+                        borderaxespad=0, fontsize=8, title="Branches", title_fontsize=8)
+    ax_slack.set_ylabel("Slack (MW)")
+    ax_slack.set_title("Line limit slack (rating − |pf|);  0 = congested")
+    ax_slack.set_xlabel("Hour")
+    ax_slack.set_xticks(hours)
 
     fig.tight_layout(rect=[0, 0, 0.84, 1])
 
     if mu_legend_handles:
         # Anchor flush to actual right edge of axes (after tight_layout moves them)
-        pos = ax_lmp.get_position()
+        pos = ax_mu.get_position()
         fig.legend(
             handles=mu_legend_handles,
-            loc="upper left",
-            bbox_to_anchor=(pos.x1 + 0.005, pos.y1),
+            loc="lower left",
+            bbox_to_anchor=(pos.x1 + 0.005, pos.y0),
             bbox_transform=fig.transFigure,
             borderaxespad=0,
             fontsize=7,
@@ -211,7 +278,7 @@ def main():
         Path(args.out) if args.out
         else RESULTS_DIR / f"{solution_path.stem}_optimal_values.pdf"
     )
-    plot_optimal_values(solution_path, out_path)
+    plot_optimal_values(solution_path, out_path, False)
 
 
 if __name__ == "__main__":
