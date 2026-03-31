@@ -18,7 +18,7 @@ This is a research project focused on electricity market optimization and analys
 
 ### Research Goal
 
-The primary quantity of interest is the **sensitivity of congestion dual variables (μ) to power injections** — e.g. how does the shadow price of a line's thermal limit change when a generator at a given bus produces more power. LMPs (λ, the power-balance duals) are a secondary output. When implementing or discussing sensitivity analysis, always compute both dλ/dP and dμ/dP.
+The primary quantity of interest is the **sensitivity of congestion dual variables (μ) to power injections** — e.g. how does the shadow price of a line's thermal limit change when a generator at a given bus produces more power. Important note: we are interested in all dual variables, not just LMPs. When implementing or discussing sensitivity analysis, always compute both dλ/dP and dμ/dP.
 
 - **`code/`** — All project code using EGRET goes here (optimization models, experiments, analysis scripts).
 - **`Egret/`** — Local editable install of [EGRET](https://github.com/grid-parity-exchange/Egret) (`gridx-egret`), a Pyomo-based library for electrical grid optimization. Changes here affect the installed package directly.
@@ -29,6 +29,7 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - Each file implements one idea. Different approaches are implemented in different files. Calculation, post-processing, and plotting are all implemented in separate files.
 - Functions are preferred to be around 50 lines long. Longer functions are discouraged, when possible.
 - Do not plan for every possible case. If arguments do not conform to expectations, allow the program to error out instead of providing backup options. This makes code more direct, concise, and readable.
+- Never ask for interactive inputs in python scripts
 
 ## EGRET Library Overview
 
