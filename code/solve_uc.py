@@ -174,14 +174,14 @@ def main():
     print(f"\nResults saved to {out}")
 
 
-def run(solver="gurobi", prob=0.6):
-    np.random.seed(2)
+def run(solver="gurobi", prob=0.4, seed=1, availability=None):
+    np.random.seed(seed)
     case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
     md = ModelData.read(str(case_path))
-    availability = np.random.random(len(md.data["elements"]["generator"])) < prob
-    #availability = np.array(list(map(int, np.binary_repr(42924))))
 
-    availability = availability.astype(int)
+    if availability is None:
+        random_vals = np.random.random(len(md.data["elements"]["generator"]))
+        availability = (random_vals < prob).astype(int)
     remove_unavailable_generators(md, availability)
     md_uc = solve_uc(md, solver=solver)
 
@@ -190,7 +190,19 @@ def run(solver="gurobi", prob=0.6):
     out = result_path(case_path, availability)
     md_sol.write(str(out))
     print(f"\nResults saved to {out}")
+    print(f"avail: {availability.sum()}")
+    return out
 
     
 if __name__ == "__main__":
-    run()
+    av = np.array(list(map(int, "1111011100110010")))
+    av = np.array(list(map(int, "1111001100100000")))
+    av = np.array(list(map(int, "1000100010000000")))
+    out = []
+    out.append(run(availability=av))
+    #run(prob=1.)
+    #for seed in [1, 2, 3]:
+    #    out.append(run(seed=seed, prob=0.2))
+
+    for o in out:
+        print(f"{o.stem}".replace("uc_many_gen_four_bus_uc_avail", ""))
