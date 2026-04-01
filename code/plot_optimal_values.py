@@ -183,7 +183,7 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
     ax_pg.stackplot(hours, values, labels=labels, colors=colors, alpha=0.85)
     ax_pg.set_ylabel("Dispatch (MW)")
     ax_pg.set_title("Generation dispatch by fuel type")
-    ax_pg.legend(loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0, fontsize=8)
+    ax_pg.legend(loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0, fontsize=8, ncol=2)
     ax_pg.set_xlim(hours[0], hours[-1])
 
     # ---- Panel 2: LMP / power-balance dual λ ----
@@ -280,6 +280,18 @@ def main():
     )
     plot_optimal_values(solution_path, out_path, False)
 
+def run(ID):
+    solution_path = RESULTS_DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
+    out_path = RESULTS_DIR / f"optimal_{solution_path.stem}.pdf"
+    plot_optimal_values(solution_path, out_path, False)
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1:
+        for a in sys.argv[1:]:
+            run(int(a))
+    #run(65535)
+    #run(63282)
+    #run(11778)
+    #run(16394)
+    #run(672)
