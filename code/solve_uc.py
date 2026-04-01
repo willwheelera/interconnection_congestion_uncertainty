@@ -195,14 +195,19 @@ def run(solver="gurobi", prob=0.4, seed=1, availability=None):
 
     
 if __name__ == "__main__":
-    av = np.array(list(map(int, "1111011100110010")))
-    av = np.array(list(map(int, "1111001100100000")))
-    av = np.array(list(map(int, "1000100010000000")))
     out = []
-    out.append(run(availability=av))
-    #run(prob=1.)
-    #for seed in [1, 2, 3]:
-    #    out.append(run(seed=seed, prob=0.2))
+    avs = []
+    av = np.array(list(map(int, "1111011100110010")))
+    avs.append(av)
+    av = np.array(list(map(int, "1111001100100000")))
+    avs.append(av)
+    av = np.array(list(map(int, "1000100010000000")))
+    avs.append(av)
+    for av in avs:
+        out.append(run(availability=av))
+    out.append(run(prob=1.))
+    for seed in [1, 2, 3]:
+        out.append(run(seed=seed, prob=0.2))
 
     for o in out:
         print(f"{o.stem}".replace("uc_many_gen_four_bus_uc_avail", ""))
