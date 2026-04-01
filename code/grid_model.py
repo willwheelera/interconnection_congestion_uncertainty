@@ -9,7 +9,7 @@ LOAD_PROFILE = 1 * np.array([
     280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
 ])
 
-def line_model(bus_fr, bus_to, rating=400., angle_lim=90, **kwargs):
+def line_model(bus_fr, bus_to, rating=350., angle_lim=90, **kwargs):
     d = {
         "from_bus": bus_fr, "to_bus": bus_to, "reactance": 0.002, 
         "in_service": True, "branch_type": "line", 
@@ -141,8 +141,8 @@ og_dict = {
       "L12": line_model("Bus1", "Bus2", rating=200.),
       "L23": line_model("Bus2", "Bus3", rating=200.),
       "L34": line_model("Bus3", "Bus4", rating=200.),
-      "L41": line_model("Bus4", "Bus1", rating=200.),
-      "L13": line_model("Bus1", "Bus3", rating=150.),
+      "L41": line_model("Bus4", "Bus1", rating=300.),
+      "L13": line_model("Bus1", "Bus3", rating=200.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -185,5 +185,5 @@ og_dict = {
   }
 }
 
-with open("many_gen_four_bus_uc.json", "w") as f:
+with open("../data/many_gen_four_bus_uc.json", "w") as f:
     json.dump(og_dict, f)
