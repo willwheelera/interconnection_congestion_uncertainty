@@ -124,9 +124,9 @@ gen_list = []
 for i in range(4):
     gen_list.extend([
       generator_model("Bus1", 400.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 200.0, G_TYPE2),
-      generator_model("Bus3", 100.0, G_TYPE3, p_min=0.2, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 160.0, G_TYPE4),
+      generator_model("Bus2", 200.0, G_TYPE3),
+      generator_model("Bus3", 100.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4", 160.0, G_TYPE3),
     ])
 
 og_dict = {
@@ -138,11 +138,11 @@ og_dict = {
       "Bus4": {"base_kv": 115.0}
     },
     "branch": {
-      "L12": line_model("Bus1", "Bus2", rating=200.),
-      "L23": line_model("Bus2", "Bus3", rating=200.),
-      "L34": line_model("Bus3", "Bus4", rating=200.),
-      "L41": line_model("Bus4", "Bus1", rating=300.),
-      "L13": line_model("Bus1", "Bus3", rating=200.),
+      "L12": line_model("Bus1", "Bus2", rating=360.),
+      "L23": line_model("Bus2", "Bus3", rating=360.),
+      "L34": line_model("Bus3", "Bus4", rating=360.),
+      "L41": line_model("Bus4", "Bus1", rating=360.),
+      "L13": line_model("Bus1", "Bus3", rating=240.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -159,7 +159,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (LOAD_PROFILE).tolist()
+          "values": ((LOAD_PROFILE+np.roll(LOAD_PROFILE, 2)) / 2).tolist()
         }
       }
     }
