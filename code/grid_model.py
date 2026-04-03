@@ -2,14 +2,20 @@ import numpy as np
 import copy
 import json
 
-LOAD_PROFILE = 1 * np.array([
-    168.0, 154.0, 145.6, 140.0, 145.6, 162.4,
-    187.6, 215.6, 243.6, 254.8, 260.4, 263.2,
-    257.6, 249.2, 243.6, 246.4, 257.6, 271.6,
-    280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
-])
+#LOAD_PROFILE = 2/3 * np.array([
+#    168.0, 154.0, 145.6, 140.0, 145.6, 162.4,
+#    187.6, 215.6, 243.6, 254.8, 260.4, 263.2,
+#    257.6, 249.2, 243.6, 246.4, 257.6, 271.6,
+#    280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
+#])
 
-def line_model(bus_fr, bus_to, rating=350., angle_lim=90, **kwargs):
+# Make simple load profile. Properties:
+# Contains high L4, low L2
+# Contains high L4, high L2
+# Contains high ramp rate
+
+
+def line_model(bus_fr, bus_to, rating=100., angle_lim=90, **kwargs):
     d = {
         "from_bus": bus_fr, "to_bus": bus_to, "reactance": 0.002, 
         "in_service": True, "branch_type": "line", 
@@ -116,17 +122,19 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
     d["initial_status"] = d["min_up_time"]
-    d["initial_p_output"] = d["p_min"]
+    d["initial_p_output"] = d["shutdown_capacity"]
 
     return d
     
+# Max L4: 190
+# Max L2: 190?
 gen_list = []
-for i in range(4):
+for i in range(2):
     gen_list.extend([
-      generator_model("Bus1", 400.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 200.0, G_TYPE3),
-      generator_model("Bus3", 100.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 160.0, G_TYPE3),
+      generator_model("Bus1", 500.0, G_TYPE1, ramp=0.2),
+      generator_model("Bus2", 80.0, G_TYPE3),
+      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4", 50.0, G_TYPE3),
     ])
 
 og_dict = {
@@ -138,11 +146,11 @@ og_dict = {
       "Bus4": {"base_kv": 115.0}
     },
     "branch": {
-      "L12": line_model("Bus1", "Bus2", rating=360.),
-      "L23": line_model("Bus2", "Bus3", rating=360.),
-      "L34": line_model("Bus3", "Bus4", rating=360.),
-      "L41": line_model("Bus4", "Bus1", rating=360.),
-      "L13": line_model("Bus1", "Bus3", rating=240.),
+      "L12": line_model("Bus1", "Bus2", rating=100.),
+      "L23": line_model("Bus2", "Bus3", rating=100.),
+      "L34": line_model("Bus3", "Bus4", rating=100.),
+      "L41": line_model("Bus4", "Bus1", rating=100.),
+      "L13": line_model("Bus1", "Bus3", rating=30.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -151,7 +159,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (LOAD_PROFILE * 1.5).tolist()
+          "values": (LOAD_PROFILE * 1.).tolist()
         }
       },
       "Load4": {
@@ -159,7 +167,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": ((LOAD_PROFILE+np.roll(LOAD_PROFILE, 2)) / 2).tolist()
+          "values": (np.roll(LOAD_PROFILE*1.5, 2) ).tolist()
         }
       }
     }
@@ -185,5 +193,5 @@ og_dict = {
   }
 }
 
-with open("../data/many_gen_four_bus_uc.json", "w") as f:
+with open("../data/gen8_four_bus.json", "w") as f:
     json.dump(og_dict, f)
