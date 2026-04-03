@@ -16,6 +16,8 @@ import argparse
 import copy
 from pathlib import Path
 import numpy as np
+from scipy.special import comb
+import itertools
 
 import pyomo.environ as pe
 
@@ -30,25 +32,15 @@ from egret.models.unit_commitment import (
 REPO_ROOT = Path(__file__).parent.parent
 EGRET_DIR = REPO_ROOT / "Egret"
 TEST_CASE = EGRET_DIR / "egret" / "models" / "tests" / "uc_test_instances" / "test_scuc_masked.json"
-RESULTS_DIR = REPO_ROOT / "results"
+RESULTS_DIR = REPO_ROOT / "results" / "many_gen_cases"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Solve network-constrained unit commitment problem."
-    )
-    parser.add_argument(
-        "--case", type=str, default=str(TEST_CASE),
-        help="Path to an EGRET ModelData JSON case file.",
-    )
-    parser.add_argument(
-        "--availability", type=int, nargs="+",
-        help="Binary list (0/1) of generator availability, one per generator.",
-    )
-    parser.add_argument(
-        "--solver", type=str, default="gurobi",
-        help="Solver for UC and LP re-solve (default: gurobi).",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--case", type=str, default=str(TEST_CASE),)
+    #"Binary list (0/1) of generator availability, one per generator.",
+    parser.add_argument("--availability", type=int, nargs="+",)
+    parser.add_argument("--solver", type=str, default="gurobi",)
     return parser.parse_args()
 
 
@@ -60,15 +52,14 @@ def remove_unavailable_generators(md: ModelData, availability: list[int]) -> Non
     for name, avail in zip(gen_names, availability):
         if avail == 0:
             del md.data["elements"]["generator"][name]
-            print(f"  Removed unavailable generator: {name}")
-    print(f"  {len(md.data['elements']['generator'])} generators remaining")
+            #print(f"  Removed unavailable generator: {name}")
+    #print(f"  {len(md.data['elements']['generator'])} generators remaining")
 
 
 def solve_uc(md: ModelData, solver: str = "gurobi") -> ModelData:
     """Solve unit commitment and return the solved ModelData."""
-    print("Solving unit commitment...")
     md_sol = solve_unit_commitment(
-        md, solver=solver, mipgap=0.01, timelimit=300, solver_tee=True,
+        md, solver=solver, mipgap=0.01, timelimit=300, solver_tee=False,
     )
     total_cost = md_sol.data["system"]["total_cost"]
     print(f"\nObjective value (total cost): ${total_cost:,.2f}")
@@ -144,6 +135,38 @@ def _store_branch_duals(m, md_fixed: ModelData, md_sol: ModelData) -> None:
             branches_sol[bn]["mu_lower"]["values"][dt] = max(0.0, -mu)
 
 
+def get_load(md):
+    total_load = np.zeros(24)
+    for load in md.data["elements"]["load"].values():
+        for i, val in enumerate(load["p_load"]["values"]):
+            total_load[i] += val
+    max_load = total_load.max()
+    initial_load = total_load[0]
+    return max_load, initial_load
+
+def get_gen_case(md, av):
+    gen_dict = md.data["elements"]["generator"]
+    genkeys = list(gen_dict.keys())
+    total_cap = 0.
+    min_on = 0.
+    for w in np.where(av)[0]:
+        total_cap += gen_dict[genkeys[w]]["p_max"]
+        min_on += gen_dict[genkeys[w]]["p_min"]
+    return total_cap, min_on
+
+
+def create_case(md_ref, availability, load_ratio):
+    md = copy.deepcopy(md_ref)
+    remove_unavailable_generators(md, availability)
+    for gen in md.data["elements"]["generator"].values():
+        gen["initial_p_output"] = load_ratio * gen["p_max"]
+    return md
+        
+    
+def avail2code(availability):
+    return int("".join(str(b) for b in availability), 2)
+
+
 def result_path(case_path: Path, availability: list[int] | None) -> Path:
     """Build the output file path from case name and availability flags."""
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -157,57 +180,61 @@ def result_path(case_path: Path, availability: list[int] | None) -> Path:
 def main():
     args = parse_args()
     case_path = Path(args.case)
-
-    print(f"Loading {case_path.name}...")
     md = ModelData.read(str(case_path))
 
-    if args.availability is not None:
-        remove_unavailable_generators(md, args.availability)
-
-    md_uc = solve_uc(md, solver=args.solver)
-
-    print("Re-solving with fixed commitments for LP duals...")
-    md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=args.solver)
-
-    out = result_path(case_path, args.availability)
-    md_sol.write(str(out))
-    print(f"\nResults saved to {out}")
+    availability = args.availability
+    if args.availability is None:
+        availability = "1"* len(md.data["elements"]["generator"])
+    av = list(map(int, availability))
+    run(md, av, case_path, args.solver)
 
 
-def run(solver="gurobi", prob=0.4, seed=1, availability=None):
-    np.random.seed(seed)
-    case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
-    md = ModelData.read(str(case_path))
+def run(md, availability, case_path, max_load=None, solver="gurobi"):
+    total_cap, min_on = get_gen_case(md, availability)
 
-    if availability is None:
-        random_vals = np.random.random(len(md.data["elements"]["generator"]))
-        availability = (random_vals < prob).astype(int)
-    remove_unavailable_generators(md, availability)
+    if max_load is None:
+        max_load, initial_load = get_load(md)
+    if total_cap < max_load:
+        print(f"Skipping {avail2code(availability)} ({availability.sum()}): max load infeasible")
+        return None
+
+    initial_load = 0.
+    for load in md.data["elements"]["load"].values():
+        initial_load += load["p_load"]["values"][0]
+    
+    md = create_case(md, availability, initial_load / total_cap)
     md_uc = solve_uc(md, solver=solver)
-
-    print("Re-solving with fixed commitments for LP duals...")
     md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
     out = result_path(case_path, availability)
     md_sol.write(str(out))
-    print(f"\nResults saved to {out}")
-    print(f"avail: {availability.sum()}")
+    print(f"\nResults saved to {out}, avail: {availability.sum()}")
     return out
+
+
+def run_many_cases(case_path, n_avail=3):
+    md = ModelData.read(str(case_path))
+    max_load, initial_load = get_load(md)
+
+    gen_dict = md.data["elements"]["generator"]
+    ngen = len(gen_dict)
+    genkeys = list(gen_dict.keys())
+    print(f"Checking {comb(ngen, n_avail):.0f} configs")
+
+    viable_configs = 0
+    av = np.zeros(ngen, dtype=int)
+    for indices in itertools.combinations(range(ngen), n_avail):
+        av[:] = 0
+        av[list(indices)] = 1
+        out = run(md, av, case_path)
+        if out:
+            viable_configs += 1
+
+    print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
 
     
 if __name__ == "__main__":
-    out = []
-    avs = []
-    av = np.array(list(map(int, "1111011100110010")))
-    avs.append(av)
-    av = np.array(list(map(int, "1111001100100000")))
-    avs.append(av)
-    av = np.array(list(map(int, "1000100010000000")))
-    avs.append(av)
-    for av in avs:
-        out.append(run(availability=av))
-    out.append(run(prob=1.))
-    for seed in [1, 2, 3]:
-        out.append(run(seed=seed, prob=0.2))
-
-    for o in out:
-        print(f"{o.stem}".replace("uc_many_gen_four_bus_uc_avail", ""))
+    import time
+    t0 = time.perf_counter()
+    case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
+    run_many_cases(case_path, n_avail=3)
+    print(f"time {time.perf_counter()-t0:.2f}")
