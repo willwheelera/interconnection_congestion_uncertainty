@@ -151,10 +151,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
     meta = load_generator_metadata(solution_path)
     lmp_df, mu_df = load_lmp_mu(solution_path)
     slack_df, pf_df = load_branch_slacks(solution_path)
-    print(lmp_df)
-    print(mu_df)
-    print(slack_df)
-    print(pf_df)
+    #print(lmp_df)
+    #print(pf_df)
 
     hours = np.arange(len(pg_df))
     pg_by_fuel = _pg_by_fuel(pg_df, meta)
@@ -281,8 +279,9 @@ def main():
     plot_optimal_values(solution_path, out_path, False)
 
 def run(ID):
-    solution_path = RESULTS_DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
-    out_path = RESULTS_DIR / f"optimal_{solution_path.stem}.pdf"
+    DIR = RESULTS_DIR / "many_gen_cases"
+    solution_path = DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
+    out_path = DIR / f"optimal_{solution_path.stem}.pdf"
     plot_optimal_values(solution_path, out_path, False)
 
 if __name__ == "__main__":
