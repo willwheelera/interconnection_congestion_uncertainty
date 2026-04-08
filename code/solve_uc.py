@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import comb
 import itertools
+import concurrent.futures
 
 import pyomo.environ as pe
 
@@ -64,7 +65,7 @@ def solve_uc(md: ModelData, solver: str = "gurobi") -> ModelData:
         md, solver=solver, mipgap=0.01, timelimit=300, solver_tee=False,
     )
     total_cost = md_sol.data["system"]["total_cost"]
-    print(f"\nObjective value (total cost): ${total_cost:,.2f}")
+    #print(f"\nObjective value (total cost): ${total_cost:,.2f}")
     return md_sol
 
 
@@ -211,7 +212,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
     out = result_path(case_path, availability)
     md_sol.write(str(out))
-    print(f"\nResults saved to {out}, avail: {availability.sum()}")
+    #print(f"\nResults saved to {out}, avail: {availability.sum()}")
     return out
 
 
@@ -226,12 +227,17 @@ def run_many_cases(case_path, n_avail=3):
 
     viable_configs = 0
     av = np.zeros(ngen, dtype=int)
-    for indices in itertools.combinations(range(ngen), n_avail):
-        av[:] = 0
-        av[list(indices)] = 1
-        out = run(md, av, case_path)
-        if out:
-            viable_configs += 1
+
+    with concurrent.futures.ProcessPoolExecutor() as ex:
+        out = []
+        for indices in itertools.combinations(range(ngen), n_avail):
+            av[:] = 0
+            av[list(indices)] = 1
+            out.append(ex.submit(run, md, av, case_path))
+            #out = run(md, av, case_path)
+        for o in out:
+            if o.result():
+                viable_configs += 1
 
     print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
 
