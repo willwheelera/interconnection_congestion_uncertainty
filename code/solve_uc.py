@@ -230,9 +230,11 @@ def run_many_cases(case_path, n_avail=3):
 
     with concurrent.futures.ProcessPoolExecutor() as ex:
         out = []
-        for indices in itertools.combinations(range(ngen), n_avail):
-            av[:] = 0
-            av[list(indices)] = 1
+        #for indices in itertools.combinations(range(ngen), n_avail):
+        #    av[:] = 0
+        #    av[list(indices)] = 1
+        for i in range(int(2**ngen)):
+            av[:] = list(map(int, np.binary_repr(i, ngen)))
             out.append(ex.submit(run, md, av, case_path))
             #out = run(md, av, case_path)
         for o in out:
@@ -247,7 +249,7 @@ if __name__ == "__main__":
     t0 = time.perf_counter()
     case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
     run_many_cases(case_path, n_avail=3)
-    run_many_cases(case_path, n_avail=5)
-    run_many_cases(case_path, n_avail=6)
-    run_many_cases(case_path, n_avail=4)
+    #run_many_cases(case_path, n_avail=5)
+    #run_many_cases(case_path, n_avail=6)
+    #run_many_cases(case_path, n_avail=4)
     print(f"time {time.perf_counter()-t0:.2f}")
