@@ -8,11 +8,18 @@ import json
 #    257.6, 249.2, 243.6, 246.4, 257.6, 271.6,
 #    280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
 #])
+shape1 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
+shape2 = np.interp(np.arange(24), [-1, 3, 11, 15, 23], [0, 1, 0, 1, 0])
+PEAK = 180
+LOAD2 = (0.7 * shape1 + 0.3) * PEAK
+LOAD4 = (0.6 * shape2 + 0.4) * PEAK
+
 
 # Make simple load profile. Properties:
 # Contains high L4, low L2
 # Contains high L4, high L2
 # Contains high ramp rate
+# Start at 0 load.
 
 
 def line_model(bus_fr, bus_to, rating=100., angle_lim=90, **kwargs):
@@ -128,13 +135,15 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
     
 # Max L4: 190
 # Max L2: 190?
+# what's the point of gens at 2, 4? change voltage. 
+# not interested in infeasible problems: make load penalty 100 instead of large.
 gen_list = []
 for i in range(2):
     gen_list.extend([
-      generator_model("Bus1", 500.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 80.0, G_TYPE3),
-      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 50.0, G_TYPE3),
+      generator_model("Bus1", 200.0, G_TYPE1, ramp=0.2),
+      generator_model("Bus2", 50.0, G_TYPE3),
+      generator_model("Bus3", 100.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4", 30.0, G_TYPE3),
     ])
 
 og_dict = {
@@ -146,11 +155,11 @@ og_dict = {
       "Bus4": {"base_kv": 115.0}
     },
     "branch": {
-      "L12": line_model("Bus1", "Bus2", rating=100.),
+      "L12": line_model("Bus1", "Bus2", rating=120.),
       "L23": line_model("Bus2", "Bus3", rating=100.),
       "L34": line_model("Bus3", "Bus4", rating=100.),
-      "L41": line_model("Bus4", "Bus1", rating=100.),
-      "L13": line_model("Bus1", "Bus3", rating=30.),
+      "L41": line_model("Bus4", "Bus1", rating=130.),
+      "L13": line_model("Bus1", "Bus3", rating=90.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -159,7 +168,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (LOAD_PROFILE * 1.).tolist()
+          "values": (LOAD2).tolist()
         }
       },
       "Load4": {
@@ -167,7 +176,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (np.roll(LOAD_PROFILE*1.5, 2) ).tolist()
+          "values": (LOAD4).tolist()
         }
       }
     }
@@ -176,8 +185,8 @@ og_dict = {
     "model_name": "many_gen_four_bus_uc",
     "time_keys": [str(i) for i in range(1, 25)],
     "time_period_length_minutes": 60,
-    "load_mismatch_cost": 10000.0,
-    "reserve_shortfall_cost": 1000.0,
+    "load_mismatch_cost": 100.0,
+    "reserve_shortfall_cost": 100.0,
     "baseMVA": 1.0,
     "reference_bus": "Bus1",
     "reference_bus_angle": 0.0,

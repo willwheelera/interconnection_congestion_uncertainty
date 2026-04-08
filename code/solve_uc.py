@@ -28,11 +28,13 @@ from egret.models.unit_commitment import (
     solve_unit_commitment,
     _save_uc_results,
 )
+import logging
+logging.getLogger('egret').setLevel(logging.WARNING)
 
 REPO_ROOT = Path(__file__).parent.parent
 EGRET_DIR = REPO_ROOT / "Egret"
 TEST_CASE = EGRET_DIR / "egret" / "models" / "tests" / "uc_test_instances" / "test_scuc_masked.json"
-RESULTS_DIR = REPO_ROOT / "results" / "many_gen_cases"
+RESULTS_DIR = REPO_ROOT / "results"
 
 
 def parse_args():
@@ -169,12 +171,14 @@ def avail2code(availability):
 
 def result_path(case_path: Path, availability: list[int] | None) -> Path:
     """Build the output file path from case name and availability flags."""
-    RESULTS_DIR.mkdir(exist_ok=True)
     case_id = case_path.stem
+    case_dir = case_id.replace("_uc.json", "").replace(".json", "")
+    out_dir = RESULTS_DIR / case_dir
+    out_dir.mkdir(exist_ok=True)
     if availability is not None:
         avail_code = int("".join(str(b) for b in availability), 2)
-        return RESULTS_DIR / f"uc_{case_id}_avail{avail_code}.json"
-    return RESULTS_DIR / f"uc_{case_id}.json"
+        return out_dir / f"uc_{case_id}_avail{avail_code}.json"
+    return out_dir / f"uc_{case_id}.json"
 
 
 def main():
@@ -235,6 +239,9 @@ def run_many_cases(case_path, n_avail=3):
 if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
-    case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
-    run_many_cases(case_path, n_avail=3)
+    case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
+    #run_many_cases(case_path, n_avail=3)
+    #run_many_cases(case_path, n_avail=5)
+    #run_many_cases(case_path, n_avail=6)
+    run_many_cases(case_path, n_avail=4)
     print(f"time {time.perf_counter()-t0:.2f}")
