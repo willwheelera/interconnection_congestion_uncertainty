@@ -25,12 +25,16 @@ def run(ngen = 8, n_avail = 5):
             out.append(a)
 
     df = pd.concat(out, axis=1).T
-    df["total"] = df.sum(axis=1)
     print(df.round(0))
-    print(f"{n_avail} congestion \n{(df>0).sum(axis=0) / len(df)}")
+    threshold = [0, 1e-2, 1e-1]
+    congestion = [(df>eps).sum(axis=0) / len(df) for eps in threshold]
+    for c,t in zip(congestion, threshold): c.name = f">{t}"
+    congestion = pd.concat(congestion, axis=1)
+    congestion.loc["total"] = congestion.sum(axis=0)
+    print(len(df))
+    print(f"avail {n_avail}, congestion \n{congestion}")
 
 run(8, 4)
-quit()
 run(8, 5)
 run(8, 6)
 run(8, 3)

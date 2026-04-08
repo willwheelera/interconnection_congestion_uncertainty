@@ -162,7 +162,7 @@ def create_case(md_ref, availability, load_ratio):
     md = copy.deepcopy(md_ref)
     remove_unavailable_generators(md, availability)
     for gen in md.data["elements"]["generator"].values():
-        gen["initial_p_output"] = load_ratio * gen["p_max"]
+        gen["initial_p_output"] = max(gen["p_min"], load_ratio * gen["p_max"])
     return md
         
     
@@ -246,8 +246,8 @@ if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
     case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
-    #run_many_cases(case_path, n_avail=3)
-    #run_many_cases(case_path, n_avail=5)
-    #run_many_cases(case_path, n_avail=6)
+    run_many_cases(case_path, n_avail=3)
+    run_many_cases(case_path, n_avail=5)
+    run_many_cases(case_path, n_avail=6)
     run_many_cases(case_path, n_avail=4)
     print(f"time {time.perf_counter()-t0:.2f}")

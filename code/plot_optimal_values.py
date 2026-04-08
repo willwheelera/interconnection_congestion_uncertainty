@@ -49,6 +49,18 @@ FUEL_COLORS = {
 }
 
 
+def load_total_load(solution_path: Path) -> np.ndarray:
+    """Return total system load (MW) per hour as a 1-D array."""
+    raw = json.loads(solution_path.read_text())
+    n_hours = len(raw["system"]["time_keys"])
+    total = np.zeros(n_hours)
+    for load in raw["elements"]["load"].values():
+        pl = load["p_load"]
+        vals = pl["values"] if isinstance(pl, dict) else [float(pl)] * n_hours
+        total += np.array(vals)
+    return total
+
+
 def load_pg(solution_path: Path) -> pd.DataFrame:
     """Return (n_hours × n_generators) DataFrame of pg dispatch in MW."""
     raw = json.loads(solution_path.read_text())
@@ -148,6 +160,7 @@ def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]
 
 def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) -> None:
     pg_df = load_pg(solution_path)
+    total_load = load_total_load(solution_path)
     meta = load_generator_metadata(solution_path)
     lmp_df, mu_df = load_lmp_mu(solution_path)
     slack_df, pf_df = load_branch_slacks(solution_path)
@@ -180,6 +193,7 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
         colors = [_color_f(i/n) for i in range(n)]
         
     ax_pg.stackplot(hours, values, labels=labels, colors=colors, alpha=0.85)
+    ax_pg.plot(hours, total_load, color="black", linewidth=0.5, linestyle="--", label="Load")
     ax_pg.set_ylabel("Dispatch (MW)")
     ax_pg.set_title("Generation dispatch by fuel type")
     ax_pg.legend(loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0, fontsize=8, ncol=2)
