@@ -162,7 +162,8 @@ def create_case(md_ref, availability, load_ratio):
     md = copy.deepcopy(md_ref)
     remove_unavailable_generators(md, availability)
     for gen in md.data["elements"]["generator"].values():
-        gen["initial_p_output"] = max(gen["p_min"], load_ratio * gen["p_max"])
+        gen["initial_p_output"] = 0#gen["p_min"] #max(gen["p_min"], load_ratio * gen["p_max"])
+        gen["initial_status"] = -gen["min_down_time"]
     return md
         
     
@@ -200,7 +201,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     if max_load is None:
         max_load, initial_load = get_load(md)
     if total_cap < max_load:
-        print(f"Skipping {avail2code(availability)} ({availability.sum()}): max load infeasible")
+        print(f"Skipping {avail2code(availability)} ({np.sum(availability)} gens): max load infeasible")
         return None
 
     initial_load = 0.
@@ -212,7 +213,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
     out = result_path(case_path, availability)
     md_sol.write(str(out))
-    #print(f"\nResults saved to {out}, avail: {availability.sum()}")
+    #print(f"Result {avail2code(availability)}, avail: {np.sum(availability)}")
     return out
 
 
@@ -226,7 +227,6 @@ def run_many_cases(case_path, n_avail=3):
     print(f"Checking {comb(ngen, n_avail):.0f} configs")
 
     viable_configs = 0
-    av = np.zeros(ngen, dtype=int)
 
     with concurrent.futures.ProcessPoolExecutor() as ex:
         out = []
@@ -234,14 +234,15 @@ def run_many_cases(case_path, n_avail=3):
         #    av[:] = 0
         #    av[list(indices)] = 1
         for i in range(int(2**ngen)):
-            av[:] = list(map(int, np.binary_repr(i, ngen)))
+            av = list(map(int, np.binary_repr(i, ngen)))
             out.append(ex.submit(run, md, av, case_path))
             #out = run(md, av, case_path)
         for o in out:
             if o.result():
                 viable_configs += 1
 
-    print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
+    #print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
+    print(f"viable {viable_configs} / {2**ngen:.0f}")
 
     
 if __name__ == "__main__":
