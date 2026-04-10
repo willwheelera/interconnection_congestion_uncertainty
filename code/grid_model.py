@@ -10,9 +10,9 @@ import json
 #])
 shape1 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
 #shape2 = np.interp(np.arange(24), [-1, 3, 11, 15, 23], [0, 1, 0, 1, 0])
-shape2 = np.interp(np.arange(24), [0, 6, 12, 18, 24], [0, 1, 0, 1, 0])
+shape2 = np.interp(np.arange(24), [0, 6, 12, 18, 24], [0.2, 1, 0, 1, 0])
 PEAK = 150
-weight = 0.9
+weight = 0.8
 LOAD2 = (weight * shape1 + 1 - weight) * PEAK
 LOAD4 = (weight * shape2 + 1 - weight) * PEAK
 
@@ -116,13 +116,13 @@ G_DEFAULT = {
     "shutdown_cost": 0.0,
 }
 
-def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25, **kwargs):
+def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.25, **kwargs):
     d = G_DEFAULT.copy()
     d.update(copy.deepcopy(gtype))
 
     d["bus"] = bus
     d["ramp_up_60min"] = d["ramp_down_60min"] = ramp * p_max
-    d["startup_capacity"] = d["shutdown_capacity"] = start_capacity * p_max
+    d["startup_capacity"] = d["shutdown_capacity"] = startup_capacity * p_max
     for i, s in enumerate(d["startup_cost"]):
         d["startup_cost"][i] = [s[0], s[1] * d["startup_capacity"]]
     for i, v in enumerate(d["p_cost"]["values"]):
@@ -142,10 +142,10 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
 gen_list = []
 for i in range(2):
     gen_list.extend([
-      generator_model("Bus1", 200.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 50.0, G_TYPE3),
-      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 50.0, G_TYPE3),
+      generator_model("Bus1", 200.0, G_TYPE1, p_min=0.1, ramp=0.2),
+      generator_model("Bus2", 50.0, G_TYPE3, p_min=0., startup_capacity=0.4),
+      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.1, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4", 50.0, G_TYPE3, startup_capacity=0.4),
     ])
 
 og_dict = {
@@ -157,11 +157,11 @@ og_dict = {
       "Bus4": {"base_kv": 115.0}
     },
     "branch": {
-      "L12": line_model("Bus1", "Bus2", rating=110.),
+      "L12": line_model("Bus1", "Bus2", rating=100.),
       "L23": line_model("Bus2", "Bus3", rating=100.),
-      "L34": line_model("Bus3", "Bus4", rating=100.),
-      "L41": line_model("Bus4", "Bus1", rating=100.),
-      "L13": line_model("Bus1", "Bus3", rating=50.),
+      "L34": line_model("Bus3", "Bus4", rating=103.),
+      "L41": line_model("Bus4", "Bus1", rating=103.),
+      "L13": line_model("Bus1", "Bus3", rating=58.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
