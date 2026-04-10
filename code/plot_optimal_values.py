@@ -217,8 +217,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
     mu_legend_handles = []
     if not mu_df.empty:
         # Only draw branches that are ever non-zero
-        active = mu_df.columns[(mu_df != 0).any(axis=0)]
-        inactive = mu_df.columns[(mu_df == 0).all(axis=0)]
+        active = mu_df.columns[(mu_df.abs() >= 1e-6).any(axis=0)]
+        inactive = mu_df.columns[(mu_df.abs() < 1e-6).all(axis=0)]
         if len(inactive) > 0:
             h_line, = ax_mu.plot(mu_df.index, np.zeros(len(mu_df)), color="lightgrey",
                                  linewidth=0.5, label=f"{len(inactive)} uncongested")
