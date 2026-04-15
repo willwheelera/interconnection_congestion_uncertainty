@@ -25,6 +25,23 @@ def _scalar(v, default=0.0):
     return v
 
 
+def _cumulative(v):
+    """Sum a time-series dict's values, or return the scalar."""
+    if isinstance(v, dict) and v.get("data_type") == "time_series":
+        return sum(v["values"])
+    if v is None:
+        return 0.0
+    return v
+
+
+def compute_bus_energy(egret_data):
+    """Cumulative energy consumption (MWh, assuming hourly) per bus name."""
+    energy = {name: 0.0 for name in egret_data["elements"].get("bus", {})}
+    for load in egret_data["elements"].get("load", {}).values():
+        energy[load["bus"]] += _cumulative(load.get("p_load"))
+    return energy
+
+
 def build_pandapower_network(egret_data):
     elements = egret_data["elements"]
     base_mva = egret_data["system"].get("baseMVA", 100.0)
@@ -107,8 +124,60 @@ def main():
     assign_geodata(net)
 
     fig, ax = plt.subplots(figsize=(10, 8))
-    pplot.simple_plot(net, ax=ax, show_plot=False)
     ax.set_title(egret_data["system"].get("model_name", "Network"))
+
+    bus_xy = {
+        i: geojson.loads(net.bus.at[i, "geo"])["coordinates"]
+        for i in net.bus.index
+    }
+
+    lc = pplot.create_line_collection(net, use_bus_geodata=True, color="gray", zorder=1)
+    pplot.draw_collections([lc], ax=ax)
+
+    bus_energy = compute_bus_energy(egret_data)
+    xs = [bus_xy[i][0] for i in net.bus.index]
+    ys = [bus_xy[i][1] for i in net.bus.index]
+    cs = [bus_energy.get(net.bus.at[i, "name"], 0.0) for i in net.bus.index]
+    sc = ax.scatter(xs, ys, c=cs, cmap="viridis", s=120, zorder=5, edgecolors="k")
+    fig.colorbar(sc, ax=ax, label="Cumulative load energy (MWh)")
+
+    name_to_idx = {net.bus.at[i, "name"]: i for i in net.bus.index}
+    gen_buses = {
+        gen["bus"] for gen in egret_data["elements"].get("generator", {}).values()
+    }
+    gxs = [bus_xy[name_to_idx[b]][0] for b in gen_buses if b in name_to_idx]
+    gys = [bus_xy[name_to_idx[b]][1] for b in gen_buses if b in name_to_idx]
+    ax.scatter(
+        gxs, gys, marker="^", s=40, facecolor="red", edgecolors="k",
+        zorder=6, label="Generator",
+    )
+    ax.legend(loc="best", fontsize=8)
+
+    for i in net.bus.index:
+        x, y = bus_xy[i]
+        ax.annotate(
+            net.bus.at[i, "name"],
+            xy=(x, y),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=8,
+            zorder=7,
+        )
+
+    offset = 0.04
+    for _, line in net.line.iterrows():
+        x0, y0 = bus_xy[line.from_bus]
+        x1, y1 = bus_xy[line.to_bus]
+        dx, dy = x1 - x0, y1 - y0
+        norm = (dx**2 + dy**2) ** 0.5 or 1.0
+        nx_, ny_ = -dy / norm, dx / norm
+        ax.annotate(
+            line["name"],
+            xy=((x0 + x1) / 2 + offset * nx_, (y0 + y1) / 2 + offset * ny_),
+            fontsize=8,
+            ha="center",
+            va="center",
+        )
 
     outputfile = None
     if outputfile:
