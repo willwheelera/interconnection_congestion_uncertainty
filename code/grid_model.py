@@ -116,7 +116,7 @@ G_DEFAULT = {
     "shutdown_cost": 0.0,
 }
 
-def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.25, **kwargs):
+def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.25, cost_scale=1.0, **kwargs):
     d = G_DEFAULT.copy()
     d.update(copy.deepcopy(gtype))
 
@@ -126,7 +126,7 @@ def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.
     for i, s in enumerate(d["startup_cost"]):
         d["startup_cost"][i] = [s[0], s[1] * d["startup_capacity"]]
     for i, v in enumerate(d["p_cost"]["values"]):
-        v0 = v[0] * p_max
+        v0 = v[0] * p_max * cost_scale
         d["p_cost"]["values"][i] = [v0, v[1] * v0]
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
@@ -141,11 +141,12 @@ def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.
 # not interested in infeasible problems: make load penalty 100 instead of large.
 gen_list = []
 for i in range(2):
+    c = 1.0 + 0.01 * i
     gen_list.extend([
-      generator_model("Bus1", 200.0, G_TYPE1, p_min=0.1, ramp=0.2),
-      generator_model("Bus2", 50.0, G_TYPE3, p_min=0., startup_capacity=0.4),
-      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.1, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 50.0, G_TYPE3, startup_capacity=0.4),
+      generator_model("Bus1", 200.0, G_TYPE1, cost_scale=c, p_min=0.1, ramp=0.2),
+      generator_model("Bus2",  50.0, G_TYPE3, cost_scale=c, p_min=0., startup_capacity=0.4),
+      generator_model("Bus3", 200.0, G_TYPE2, cost_scale=c, p_min=0.1, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4",  50.0, G_TYPE3, cost_scale=c, startup_capacity=0.4),
     ])
 
 og_dict = {
