@@ -20,8 +20,8 @@ import numpy as np
 # Paths
 REPO_ROOT = Path(__file__).parent.parent
 EGRET_DIR = REPO_ROOT / "Egret"
-#TEST_CASE = EGRET_DIR / "egret" / "models" / "tests" / "uc_test_instances" / "test_scuc_masked.json"
-TEST_CASE = REPO_ROOT / "data" / "four_bus_uc.json"
+TEST_CASE = EGRET_DIR / "egret" / "models" / "tests" / "uc_test_instances" / "test_scuc_masked.json"
+#TEST_CASE = REPO_ROOT / "data" / "four_bus_uc.json"
 
 # Load the test case into an EGRET ModelData object
 print(f"Loading {TEST_CASE.name}...")
@@ -88,6 +88,17 @@ for l, load in elements['load'].items():
     load_df[l] = load["p_load"]["values"]
 load_df = pd.DataFrame(load_df)
 print(load_df)
+
+bus_stats = {}
+for g in elements["generator"].values():
+    pmax = g["p_max"]
+    if isinstance(pmax, dict):
+        pmax = max(pmax["values"])
+    row = bus_stats.setdefault(g["bus"], {"n_gens": 0, "p_max_sum": 0.0})
+    row["n_gens"] += 1
+    row["p_max_sum"] += float(pmax)
+print("Generators per bus")
+print(pd.DataFrame.from_dict(bus_stats, orient="index").sort_index())
 
 pmax_df = []
 table = {k: [] for k in "CGNOHSW"}
