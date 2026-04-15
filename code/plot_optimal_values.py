@@ -158,15 +158,24 @@ def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]
     return result
 
 
+def print_df_totals(lmp_df, mu_df):
+    lmp_df["total"] = lmp_df.sum(axis=1)
+    mu_df["total"] = mu_df.sum(axis=1)
+    print(lmp_df.round(1))
+    print(lmp_df.sum().abs().round(1))
+    print(mu_df.round(1))
+    print(mu_df.sum().abs().round(1))
+    lmp_df.drop(columns="total", inplace=True)
+    mu_df.drop(columns="total", inplace=True)
+    print(((mu_df**2).sum(axis=0)**0.5).round(2))
+
+
 def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) -> None:
     pg_df = load_pg(solution_path)
     total_load = load_total_load(solution_path)
     meta = load_generator_metadata(solution_path)
     lmp_df, mu_df = load_lmp_mu(solution_path)
     slack_df, pf_df = load_branch_slacks(solution_path)
-    #print(lmp_df)
-    #print(pf_df)
-    print(((mu_df**2).sum(axis=0)**0.5).round(2))
 
     hours = np.arange(len(pg_df))
     pg_by_fuel = _pg_by_fuel(pg_df, meta)
@@ -240,8 +249,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
             ax_slack.plot(slack_df.index, slack_df[br], color=cmap3(i),
                           linewidth=1.2, marker="o", markersize=3, label=br)
         ax_slack.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.6)
-        ax_slack.legend(loc="upper left", bbox_to_anchor=(1.01, 1),
-                        borderaxespad=0, fontsize=8, title="Branches", title_fontsize=8)
+        #ax_slack.legend(loc="upper left", bbox_to_anchor=(1.01, 1),
+        #                borderaxespad=0, fontsize=8, title="Branches", title_fontsize=8)
     ax_slack.set_ylabel("Slack (MW)")
     ax_slack.set_title("Line limit slack (rating − |pf|);  0 = congested")
     ax_slack.set_xlabel("Hour")
@@ -249,7 +258,7 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
 
     fig.tight_layout(rect=[0, 0, 0.84, 1])
 
-    if mu_legend_handles:
+    if mu_legend_handles and len(mu_legend_handles) < 20:
         # Anchor flush to actual right edge of axes (after tight_layout moves them)
         pos = ax_mu.get_position()
         fig.legend(
@@ -293,7 +302,7 @@ def main():
     )
     plot_optimal_values(solution_path, out_path, False)
 
-def run(ID):
+def run_8gen(ID):
     #DIR = RESULTS_DIR / "many_gen_cases"
     #solution_path = DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
     DIR = RESULTS_DIR / "gen8_four_bus"
@@ -301,13 +310,14 @@ def run(ID):
     out_path = DIR / f"optimal_{solution_path.stem}.pdf"
     plot_optimal_values(solution_path, out_path, False)
 
+def run_egret_test(ID):
+    DIR = RESULTS_DIR / "test_scuc_masked"
+    solution_path = DIR / f"uc_test_scuc_masked_avail{ID}.json"
+    out_path = DIR / f"optimal_{solution_path.stem}.pdf"
+    plot_optimal_values(solution_path, out_path, True)
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         for a in sys.argv[1:]:
-            run(int(a))
-    #run(65535)
-    #run(63282)
-    #run(11778)
-    #run(16394)
-    #run(672)
+            run_egret_test(int(a))
