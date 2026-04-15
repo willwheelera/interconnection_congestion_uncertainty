@@ -141,8 +141,7 @@ def _store_branch_duals(m, md_fixed: ModelData, md_sol: ModelData) -> None:
 def get_load(md):
     total_load = np.zeros(24)
     for load in md.data["elements"]["load"].values():
-        for i, val in enumerate(load["p_load"]["values"]):
-            total_load[i] += val
+        total_load += np.array(load["p_load"]["values"])
     max_load = total_load.max()
     initial_load = total_load[0]
     return max_load, initial_load
@@ -153,8 +152,13 @@ def get_gen_case(md, av):
     total_cap = 0.
     min_on = 0.
     for w in np.where(av)[0]:
-        total_cap += gen_dict[genkeys[w]]["p_max"]
-        min_on += gen_dict[genkeys[w]]["p_min"]
+        p_max = gen_dict[genkeys[w]]["p_max"]
+        p_min = gen_dict[genkeys[w]]["p_min"]
+        if type(p_max) == dict: # initial val only
+            p_max = p_max["values"][0]
+            p_min = p_min["values"][0]
+        total_cap += p_max
+        min_on += p_min
     return total_cap, min_on
 
 
@@ -163,7 +167,8 @@ def create_case(md_ref, availability, load_ratio):
     remove_unavailable_generators(md, availability)
     for gen in md.data["elements"]["generator"].values():
         gen["initial_p_output"] = 0#gen["p_min"] #max(gen["p_min"], load_ratio * gen["p_max"])
-        gen["initial_status"] = -gen["min_down_time"]
+        if "min_down_time" in gen.keys():
+            gen["initial_status"] = -gen["min_down_time"]
     return md
         
     
@@ -235,7 +240,7 @@ def run_many_cases(case_path, n_avail=3):
         #    av[list(indices)] = 1
         for i in range(int(2**ngen)):
             av = list(map(int, np.binary_repr(i, ngen)))
-            out.append(ex.submit(run, md, av, case_path))
+            out.append(ex.submit(run, md, av, case_path, max_load=max_load))
             #out = run(md, av, case_path)
         for o in out:
             if o.result():
@@ -244,12 +249,41 @@ def run_many_cases(case_path, n_avail=3):
     #print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
     print(f"viable {viable_configs} / {2**ngen:.0f}")
 
+def run_nminus1_cases(case_path, nremove=1):
+    md = ModelData.read(str(case_path))
+    md.data["elements"]["contingency"] = {}
+    max_load, initial_load = get_load(md)
+
+    gen_dict = md.data["elements"]["generator"]
+    ngen = len(gen_dict)
+    genkeys = list(gen_dict.keys())
+    n_avail = ngen - nremove
+    print(f"Checking {comb(ngen, n_avail):.0f} configs")
+
+    viable_configs = 0
+    total_configs = 0
+
+    with concurrent.futures.ProcessPoolExecutor() as ex:
+        out = []
+        for indices in itertools.combinations(range(ngen), n_avail):
+            av = np.zeros(ngen, dtype=int)
+            av[list(indices)] = 1
+            out.append(ex.submit(run, md, av, case_path))
+        for o in out:
+            total_configs += 1
+            if o.result():
+                viable_configs += 1
+
+    print(f"viable {viable_configs} / {total_configs}")
+
     
 if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
-    case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
-    run_many_cases(case_path, n_avail=3)
+    #case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
+    case_path = TEST_CASE
+    run_nminus1_cases(case_path, 2)
+    #run_many_cases(case_path, n_avail=3)
     #run_many_cases(case_path, n_avail=5)
     #run_many_cases(case_path, n_avail=6)
     #run_many_cases(case_path, n_avail=4)
