@@ -14,28 +14,74 @@ import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
 
-from plot_optimal_values import load_lmp_mu
-
 REPO_ROOT = Path(__file__).parent.parent
-RESULTS_DIR = REPO_ROOT / "results" / "gen8_four_bus"
+RESULTS_DIR = REPO_ROOT / "results"
 OUT_DIR = RESULTS_DIR
 
 
-def load_all_duals() -> tuple[pd.DataFrame, pd.DataFrame]:
+def _hourly(field, n_hours):
+    """Expand a scalar-or-time-series field into a length-n_hours list."""
+    return field["values"] if isinstance(field, dict) else [float(field)] * n_hours
+
+
+def load_all_duals(result_path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load LMP and mu from every solution JSON, summed over hours.
+
+    Each file is read once; generation total, load total, LMP, and μ are
+    all extracted from the same parsed dict.
 
     Returns:
         lmp_all — DataFrame with columns = bus names, one row per scenario
         mu_all  — DataFrame with columns = branch names, one row per scenario
     """
-    lmp_rows = []
-    mu_rows = []
-    for path in sorted(RESULTS_DIR.glob("uc_gen8_four_bus_avail*.json")):
-        lmp_df, mu_df = load_lmp_mu(path)
-        lmp_rows.append(lmp_df.sum())
-        mu_rows.append(mu_df.sum())
-    lmp_all = pd.DataFrame(lmp_rows).reset_index(drop=True)
-    mu_all = pd.DataFrame(mu_rows).reset_index(drop=True)
+    lmp_rows = {}
+    mu_rows = {}
+    skipped = 0
+    for path in sorted(result_path.glob("*.json")):
+        avail_id = int(path.stem.split("avail")[1])
+        if sum(map(int, np.binary_repr(avail_id))) < 3:
+            continue
+        raw = json.loads(path.read_text())
+        n_hours = len(raw["system"]["time_keys"])
+
+        total_gen = np.zeros(n_hours)
+        for g in raw["elements"]["generator"].values():
+            total_gen += np.array(_hourly(g.get("pg", 0.0), n_hours))
+
+        total_load = np.zeros(n_hours)
+        for load in raw["elements"]["load"].values():
+            total_load += np.array(_hourly(load["p_load"], n_hours))
+
+        if not np.allclose(total_gen, total_load, rtol=1e-6, atol=1e-6):
+            skipped += 1
+            print(f"Skipping {avail_id}")
+            continue
+
+        lmp_sum = {}
+        for name, b in raw["elements"]["bus"].items():
+            lmp = b.get("lmp")
+            if lmp is None:
+                continue
+            lmp_sum[name] = float(np.sum(_hourly(lmp, n_hours)))
+
+        mu_sum = {}
+        for name, br in raw["elements"]["branch"].items():
+            mu_u = br.get("mu_upper")
+            mu_l = br.get("mu_lower")
+            if mu_u is None or mu_l is None:
+                continue
+            upper = np.array(_hourly(mu_u, n_hours))
+            lower = np.array(_hourly(mu_l, n_hours))
+            mu_sum[name] = float((upper + lower).sum()) # sum abs instead of positives/negatives
+
+        lmp_rows[avail_id] = pd.Series(lmp_sum)
+        mu_rows[avail_id] = pd.Series(mu_sum)
+    if skipped:
+        print(f"Skipped {skipped} scenarios with load/generation mismatch")
+    lmp_all = pd.DataFrame(lmp_rows).T
+    lmp_all.index.name = "avail_id"
+    mu_all = pd.DataFrame(mu_rows).T
+    mu_all.index.name = "avail_id"
     return lmp_all, mu_all
 
 
@@ -45,7 +91,7 @@ def plot_lmp_distributions(ax: plt.Axes, lmp_all: pd.DataFrame) -> None:
     cmap = plt.colormaps["tab10"].resampled(len(buses))
     all_vals = lmp_all.values.ravel()
     all_vals = all_vals[np.isfinite(all_vals)]
-    bins = np.linspace(all_vals.min(), all_vals.max(), 40)
+    bins = np.linspace(all_vals.min(), all_vals.max(), 80)
     for i, bus in enumerate(buses):
         vals = lmp_all[bus].dropna().values
         ax.hist(vals, bins=bins, alpha=0.5, color=cmap(i), label=bus, edgecolor="none")
@@ -57,7 +103,7 @@ def plot_lmp_distributions(ax: plt.Axes, lmp_all: pd.DataFrame) -> None:
     ax.set_xlabel("Σ λ ($/MWh)")
     ax.set_ylabel("Count (scenarios)")
     ax.set_title("LMP sum-over-hours distribution")
-    ax.legend(fontsize=8)
+    #ax.legend(fontsize=8)
 
 
 def plot_mu_distributions(ax: plt.Axes, mu_all: pd.DataFrame) -> None:
@@ -72,7 +118,7 @@ def plot_mu_distributions(ax: plt.Axes, mu_all: pd.DataFrame) -> None:
         ax.text(0.5, 0.5, "All μ values are zero", transform=ax.transAxes,
                 ha="center", va="center")
         return
-    bins = np.linspace(nz.min(), nz.max(), 40)
+    bins = np.linspace(nz.min(), nz.max(), 80)
     for i, br in enumerate(branches):
         vals = mu_all[br].dropna().values
         vals = vals[np.abs(vals) > 1e-6]
@@ -104,9 +150,9 @@ def plot_congestion_frequency(ax: plt.Axes, mu_all: pd.DataFrame) -> None:
         ax.text(i, v + 1e-4, f"{v:.2%}", ha="center", va="bottom", fontsize=8)
 
 
-def main():
-    lmp_all, mu_all = load_all_duals()
-    n_scenarios = len(list(RESULTS_DIR.glob("uc_gen8_four_bus_avail*.json")))
+def main(result_path):
+    lmp_all, mu_all = load_all_duals(result_path)
+    n_scenarios = len(lmp_all)
     print(f"Loaded {n_scenarios} scenarios (duals summed over hours)")
 
     fig, axes = plt.subplots(3, 1, figsize=(8, 9))
@@ -114,6 +160,14 @@ def main():
     plot_lmp_distributions(axes[0], lmp_all)
     plot_mu_distributions(axes[1], mu_all)
     plot_congestion_frequency(axes[2], mu_all)
+
+    # print out the highest dual cases
+    mu_all["total"] = mu_all.sum(axis=1).abs()
+    lmp_all["total"] = lmp_all.sum(axis=1).abs()
+    tmp_mu = mu_all.sort_values("total", ascending=False)
+    tmp_lmp = lmp_all.sort_values("total", ascending=False)
+    print(tmp_lmp[:5].round(0))
+    print(tmp_mu[:5].round(0))
 
     fig.suptitle(f"Dual variable distributions ({n_scenarios} scenarios)", fontsize=12, y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
@@ -126,4 +180,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(RESULTS_DIR / "test_scuc_masked")
