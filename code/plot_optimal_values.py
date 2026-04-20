@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 
@@ -49,9 +50,17 @@ FUEL_COLORS = {
 }
 
 
+def _read_json(path: Path) -> dict:
+    """Read a JSON or gzip-compressed JSON file."""
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt") as f:
+            return json.load(f)
+    return json.loads(path.read_text())
+
+
 def load_total_load(solution_path: Path) -> np.ndarray:
     """Return total system load (MW) per hour as a 1-D array."""
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
     total = np.zeros(n_hours)
     for load in raw["elements"]["load"].values():
@@ -63,7 +72,7 @@ def load_total_load(solution_path: Path) -> np.ndarray:
 
 def load_pg(solution_path: Path) -> pd.DataFrame:
     """Return (n_hours × n_generators) DataFrame of pg dispatch in MW."""
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     gens = raw["elements"]["generator"]
     n_hours = len(raw["system"]["time_keys"])
     data = {}
@@ -75,7 +84,7 @@ def load_pg(solution_path: Path) -> pd.DataFrame:
 
 def load_generator_metadata(solution_path: Path) -> pd.DataFrame:
     """Return DataFrame with 'fuel' and 'generator_type' columns indexed by generator name."""
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     gens = raw["elements"]["generator"]
     return pd.DataFrame(
         {name: {"fuel": g.get("fuel", "?"), "type": g.get("generator_type", "?")}
@@ -94,7 +103,7 @@ def load_lmp_mu(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         mu_df   — (n_hours × n_branches) DataFrame of μ ($/MWh),
                   positive = upper limit binding, negative = lower binding
     """
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
     buses = raw["elements"]["bus"]
     branches = raw["elements"]["branch"]
@@ -126,7 +135,7 @@ def load_branch_slacks(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]
 
     slack = rating − |pf| per branch per hour (MW); zero = congested.
     """
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
     branches = raw["elements"]["branch"]
 

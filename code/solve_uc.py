@@ -184,8 +184,8 @@ def result_path(case_path: Path, availability: list[int] | None) -> Path:
     out_dir.mkdir(exist_ok=True)
     if availability is not None:
         avail_code = int("".join(str(b) for b in availability), 2)
-        return out_dir / f"uc_{case_id}_avail{avail_code}.json"
-    return out_dir / f"uc_{case_id}.json"
+        return out_dir / f"uc_{case_id}_avail{avail_code}.json.gz"
+    return out_dir / f"uc_{case_id}.json.gz"
 
 
 def main():
@@ -280,11 +280,6 @@ def run_nminus1_cases(case_path, nremove=1):
 if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
-    #case_path = REPO_ROOT / "data" / "gen8_four_bus.json"
-    case_path = TEST_CASE
-    run_nminus1_cases(case_path, 2)
-    #run_many_cases(case_path, n_avail=3)
-    #run_many_cases(case_path, n_avail=5)
-    #run_many_cases(case_path, n_avail=6)
-    #run_many_cases(case_path, n_avail=4)
+    case_path = REPO_ROOT / "data" / "case14_gen_per_bus.json"
+    run_nminus1_cases(case_path, 0)
     print(f"time {time.perf_counter()-t0:.2f}")
