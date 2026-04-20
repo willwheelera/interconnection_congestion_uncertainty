@@ -512,46 +512,55 @@ def _read_pf_dual_dict(md_h: ModelData) -> dict[str, tuple[float, float]]:
     }
 
 
-def run(
-    solution_path: Path | str = DEFAULT_SOLUTION,
-) -> None:
-    """Load a UC solution with pre-computed duals and compute sensitivity.
+def _run_single(md_h: ModelData, case_stem: str) -> None:
+    """Compute and save sensitivity for one scalar-valued ModelData."""
+    t1 = time.perf_counter()
+    lmp_base = _get_lmps(md_h)
+    pf_dual_dict = _read_pf_dual_dict(md_h)
+    branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
+    branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}
+    df_lmp, mu_sens = compute_sensitivity_barrier(md_h, md_h, lmp_base, pf_dual_dict)
+    mu_base = _compute_mu_base(md_h, lmp_base, pf_dual_dict)
+    save_results(
+        case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base,
+        branch_pf=branch_pf, branch_rating=branch_rating,
+    )
+    print(f"{case_stem} sensitivity {time.perf_counter() - t1:.1f}s")
+
+
+def run(solution_path: Path) -> None:
+    """Load a UC or OPF solution with pre-computed duals and compute sensitivity.
+
+    Auto-detects the solution type: multi-hour UC files have ``time_keys`` in
+    ``system`` and are iterated hour by hour; single-period OPF files (no
+    ``time_keys``) are processed once as-is.
 
     Expects the solution file to contain ``lmp``, ``mu_upper``, ``mu_lower``
-    fields (as produced by ``solve_uc.py``).
-
-    Parameters
-    ----------
-    solution_path:
-        Path to a saved EGRET ModelData JSON (UC result with duals).
+    fields (as produced by ``solve_uc.py`` or ``solve_opf.py``).
     """
-    t0 = time.perf_counter()
     solution_path = Path(solution_path)
     print(f"Loading {solution_path.name}...")
     md_raw = ModelData.read(str(solution_path))
     n_buses = len(dict(md_raw.elements("bus")))
-    n_hours = len(md_raw.data["system"]["time_keys"])
-    print(f"  {n_buses} buses, {n_hours} hours")
+    time_keys = md_raw.data["system"].get("time_keys")
 
-    for hour in [18, 20]:#range(n_hours):
-        t1 = time.perf_counter()
+    # Strip .json/.json.gz suffixes from stem for clean output naming.
+    stem = solution_path.name.replace(".json.gz", "").replace(".json", "")
+
+    if time_keys is None:
+        print(f"  {n_buses} buses, single-period OPF")
+        _run_single(md_raw, stem)
+        return
+
+    n_hours = len(time_keys)
+    print(f"  {n_buses} buses, {n_hours} hours")
+    for hour in [18, 20]:  # range(n_hours)
         md_h = _extract_hour(md_raw, hour)
         for _, g_data in md_h.elements("generator"):
             if g_data.get("commitment", 1) == 0:
                 g_data["p_min"] = 0.0
                 g_data["p_max"] = 0.0
-        lmp_base = _get_lmps(md_h)
-        pf_dual_dict = _read_pf_dual_dict(md_h)
-        branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
-        branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}
-        df_lmp, mu_sens = compute_sensitivity_barrier(md_h, md_h, lmp_base, pf_dual_dict)
-        mu_base = _compute_mu_base(md_h, lmp_base, pf_dual_dict)
-        case_stem = f"{solution_path.stem}_h{hour:02d}"
-        save_results(
-            case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base,
-            branch_pf=branch_pf, branch_rating=branch_rating,
-        )
-        print(f"hour {hour} sensitivity {time.perf_counter() - t1:.1f}s")
+        _run_single(md_h, f"{stem}_h{hour:02d}")
 
 
 def main():
@@ -565,7 +574,7 @@ def main():
         help="Path to a saved EGRET ModelData JSON solution file (with duals from solve_uc.py).",
     )
     args = parser.parse_args()
-    run(solution_path=args.solution)
+    run(args.solution)
 
 
 if __name__ == "__main__":
