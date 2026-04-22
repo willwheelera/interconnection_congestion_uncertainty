@@ -155,7 +155,8 @@ def plot_lmp_distributions(ax: plt.Axes, lmp_all: pd.DataFrame) -> None:
     ax.set_title("LMP sum-over-hours distribution")
     ax.set_yscale("log")
     ax.set_ylim(bottom=0.8, top=len(lmp_all) * 1.5)
-    #ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2, loc="center left", bbox_to_anchor=(1.02, 0.5),
+              title="Bus", borderaxespad=0.)
 
 
 def plot_mu_distributions(ax: plt.Axes, mu_all: pd.DataFrame, tol=1e-2) -> None:
@@ -190,7 +191,8 @@ def plot_mu_distributions(ax: plt.Axes, mu_all: pd.DataFrame, tol=1e-2) -> None:
     ax.set_title(f"Congestion dual (sum) distribution (nonzero >{tol:.0e} only)")
     ax.set_yscale("log")
     ax.set_ylim(bottom=0.8, top=len(mu_all) * 1.5)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2, loc="center left", bbox_to_anchor=(1.02, 0.5),
+              title="Branch", borderaxespad=0.)
 
 
 def plot_congestion_frequency(ax: plt.Axes, mu_all: pd.DataFrame) -> None:

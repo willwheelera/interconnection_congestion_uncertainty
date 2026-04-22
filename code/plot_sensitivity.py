@@ -139,10 +139,8 @@ def _lmp_figure(result_sets: list[dict]) -> plt.Figure:
     ax_bar.set_yticklabels(bus_names)
     ax_bar.set_xlabel("LMP ($/MWh)")
     ax_bar.set_title("Base LMPs")
-    ax_bar.invert_yaxis()
-    vmax_bar = max(base_vals) if base_vals else 1.0
-    for i, v in enumerate(base_vals):
-        ax_bar.text(v + 0.02 * vmax_bar, i, f"{v:.2f}", va="center", fontsize=8)
+    ax_bar.set_ylabel("Observed bus $i$ (LMP$_i$)")
+    ax_bar.set_ylim(n - 0.5, -0.5)
 
     for ax, results in zip(axes[1:], result_sets):
         matrix = results.get("sensitivity") or results.get("lmp_sensitivity")
@@ -153,6 +151,8 @@ def _lmp_figure(result_sets: list[dict]) -> plt.Figure:
             title=_heatmap_title(results),
             xlabel=_heatmap_xlabel(results),
         )
+        ax.set_ylabel("")
+        ax.tick_params(labelleft=False)
 
     fig.tight_layout()
     return fig
@@ -201,12 +201,16 @@ def _mu_figure(results: dict) -> plt.Figure | None:
         for col_idx, (key, label, row_names, col_names, arr) in enumerate(row_items):
             if has_bar:
                 ax_bar = axes[row_idx][col_idx * 2]
-                base_vals = [mu_base.get(key, {}).get(name, 0.0) for name in row_names]
+                base_vals = [
+                    v if abs(v := mu_base.get(key, {}).get(name, 0.0)) >= 1e-4 else 0.0
+                    for name in row_names
+                ]
                 ax_bar.barh(range(len(row_names)), base_vals, color="steelblue", edgecolor="white")
                 ax_bar.set_yticks(range(len(row_names)))
                 ax_bar.set_yticklabels(row_names, fontsize=7)
                 ax_bar.set_xlabel("μ ($/MWh)")
                 ax_bar.set_title("Base μ", fontsize=8)
+                ax_bar.set_xlim(right=max(1e-1, max(base_vals) * 1.05))
                 ax_heat = axes[row_idx][col_idx * 2 + 1]
             else:
                 ax_heat = axes[row_idx][col_idx]
@@ -266,50 +270,37 @@ def plot_sensitivity(result_sets: list[dict], out_path: Path) -> None:
     print(f"Figure saved to {out_path}")
 
 
+REPO_ROOT = Path(__file__).parent.parent
+RESULTS_DIR = REPO_ROOT / "results"
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot LMP sensitivity results from sensitivity_analysis.py "
-                    "or finite_difference_sensitivity.py."
+        description="Plot sensitivity results from sensitivity_analysis.py."
     )
-    parser.add_argument(
-        "results",
-        nargs="+",
-        help="One or two sensitivity JSON files to plot.",
-    )
-    parser.add_argument(
-        "--out",
-        type=str,
-        default=None,
-        help="Output PDF path.  Defaults to the stem of the first input file + .pdf.",
-    )
+    parser.add_argument("ID", type=str, nargs="?", default="16383",
+                        help="Availability ID of the solution file.")
+    parser.add_argument("--dir", type=str, default="case14_gen_per_bus",
+                        help="Case directory under results/.")
     args = parser.parse_args()
 
-    if len(args.results) > 2:
-        parser.error("At most two result files can be compared at once.")
+    stem = f"sensitivity_barrier_opf_{args.dir}_avail{args.ID}"
+    in_path = RESULTS_DIR / args.dir / f"{stem}.json"
+    out_path = in_path.with_suffix(".pdf")
 
-    result_sets = []
-    for r in args.results:
-        path = Path(r)
-        print(f"Loading {path.name}...")
-        data = load_results(path)
-        print(f"  method={data['method']}, case={data['case']}, buses={data['bus_names']}")
-        result_sets.append(data)
+    if not in_path.exists():
+        import sensitivity_analysis
+        solution_path = RESULTS_DIR / args.dir / f"opf_{args.dir}_avail{args.ID}.json.gz"
+        print(f"{in_path.name} not found; running sensitivity analysis on {solution_path.name}...")
+        sensitivity_analysis.run(solution_path)
 
-    out_path = (
-        Path(args.out)
-        if args.out
-        else Path(args.results[0]).with_suffix(".pdf")
-    )
-
-    plot_sensitivity(result_sets, out_path)
+    print(f"Loading {in_path.name}...")
+    data = load_results(in_path)
+    print(f"  method={data['method']}, case={data['case']}, buses={data['bus_names']}")
+    nbus = len(data["bus_names"])
+    print(f"availability {int(args.ID):0{nbus}b}")
+    plot_sensitivity([data], out_path)
 
 
 if __name__ == "__main__":
-    #main()
-    for h in [18, 20]:#range(24):
-        #fname = f"../results/sensitivity_barrier_uc_test_scuc_masked_h{h:02d}.json"
-        #fname = f"../results/sensitivity_barrier_uc_three_bus_uc_h{h:02d}.json"
-        fname = f"../results/sensitivity_barrier_uc_many_gen_four_bus_uc_avail42924_h{h:02d}.json"
-        out_path = Path(fname).with_suffix(".pdf")
-        data = load_results(Path(fname))
-        plot_sensitivity([data], out_path)
+    main()
