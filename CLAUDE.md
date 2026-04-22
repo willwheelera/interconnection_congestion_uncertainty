@@ -31,6 +31,20 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - Do not plan for every possible case. If arguments do not conform to expectations, allow the program to error out instead of providing backup options. This makes code more direct, concise, and readable.
 - Never ask for interactive inputs in python scripts
 
+### Writing style
+
+Use American English conventions (not British).
+
+The following are not words, do not use them in writing:
+- pushforward
+- copperplate
+
+LaTeX coding style:
+- Each sentence is on its own line.
+- Where appropriate sentence parts can be split across lines (colons, semicolons, and lists, may fall into this category when the parts are long).
+- Line length is unlimited. There is no need to add line breaks to keep lines under a character limit.
+- Separated equations are preferred over in-line equations, unless they are very short (such as $s_k \ge 0$).
+
 ## EGRET Library Overview
 
 EGRET (`Egret/egret/`) provides:
