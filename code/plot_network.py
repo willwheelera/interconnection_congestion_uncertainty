@@ -145,6 +145,7 @@ def plot_lines(ax, net, bus_xy):
             fontsize=8,
             ha="center",
             va="center",
+            c="blue",
         )
 
 
@@ -154,7 +155,7 @@ def plot_buses(fig, ax, net, bus_xy, bus_energy):
     ys = [bus_xy[i][1] for i in net.bus.index]
     cs = [bus_energy.get(net.bus.at[i, "name"], 0.0) for i in net.bus.index]
     sc = ax.scatter(xs, ys, c=cs, cmap="viridis", s=120, zorder=5, edgecolors="k")
-    fig.colorbar(sc, ax=ax, label="Cumulative load energy (MWh)")
+    fig.colorbar(sc, ax=ax, label="Cumulative load energy (MWh)", shrink=1.0, fraction=0.04, pad=0.10)
 
     for i in net.bus.index:
         x, y = bus_xy[i]
@@ -176,10 +177,10 @@ def plot_generators(ax, net, bus_xy, egret_data):
     }
     gxs = [bus_xy[name_to_idx[b]][0] for b in gen_buses if b in name_to_idx]
     gys = [bus_xy[name_to_idx[b]][1] for b in gen_buses if b in name_to_idx]
-    ax.scatter(
-        gxs, gys, marker="^", s=40, facecolor="red", edgecolors="k",
-        zorder=6, label="Generator",
-    )
+    #ax.scatter(
+    #    gxs, gys, marker="^", s=40, facecolor="red", edgecolors="k",
+    #    zorder=6, label="Generator",
+    #)
     ax.legend(loc="best", fontsize=8)
 
 
@@ -188,7 +189,7 @@ def plot_network(egret_data, net):
     bus_xy = get_bus_coordinates(net)
     bus_energy = compute_bus_energy(egret_data)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(6, 5))
     ax.set_title(egret_data["system"].get("model_name", "Network"))
 
     plot_lines(ax, net, bus_xy)
@@ -208,6 +209,7 @@ def main():
     assign_geodata(net)
 
     plot_network(egret_data, net)
+    plt.savefig(args.json_file.replace(".json", ".pdf"), bbox_inches="tight")
     plt.show()
 
 
