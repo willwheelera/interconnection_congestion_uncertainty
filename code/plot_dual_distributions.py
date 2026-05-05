@@ -217,8 +217,9 @@ def plot_lmp_vs_mu(lmp_all: pd.DataFrame, mu_all: pd.DataFrame, tol=1e-2) -> sns
     """
     lmp_cols = [c for c in lmp_all.columns if c != "total"]
     mu_cols = [c for c in mu_all.columns if c != "total"]
-    lmp_total = lmp_all[lmp_cols].sum(axis=1)
-    mu_total = mu_all[mu_cols].sum(axis=1)
+
+    lmp_total = np.linalg.norm(lmp_all[lmp_cols], axis=1)
+    mu_total = np.linalg.norm(mu_all[mu_cols], axis=1)
 
     mu_abs = mu_all[mu_cols].abs()
     max_val = mu_abs.max(axis=1)
