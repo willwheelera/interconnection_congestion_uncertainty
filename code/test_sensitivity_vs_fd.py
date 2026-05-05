@@ -7,9 +7,7 @@ analytical derivatives of LMPs and congestion duals w.r.t. bus power injections.
 This test verifies that the barrier sensitivity qualitatively agrees with FD
 re-solves for both LP and QP cost functions.
 
-Test case: hvdc_test_case3.json (3-bus, 2 AC branches + 2 DC branches) with
-linear costs.  Branch 3 (1→2) and DC branch 2 (3→2) are both fully congested
-at the base solution.
+Test case: case14_gen_per_bus.json (14-bus IEEE case with one generator per bus).
 
 Tolerance design
 ----------------
@@ -33,26 +31,35 @@ Usage:
 """
 
 import argparse
+import copy
 from pathlib import Path
 
 import numpy as np
 
 from egret.data.model_data import ModelData
+from egret.models.dcopf import solve_dcopf
 
 from sensitivity_analysis import (
-    _dcopf_with_fixed_commitments,
     _get_lmps,
     _network_state,
     _compute_mu_base,
+    _read_pf_dual_dict,
     compute_sensitivity_barrier,
 )
+from solve_opf import store_branch_duals
 from finite_difference_sensitivity import _inject_at_bus
 
+
+def _solve_with_duals(md: ModelData, solver: str = "gurobi") -> ModelData:
+    """Solve DCOPF and attach nu / mu_upper / mu_lower on branches."""
+    md_sol, m = solve_dcopf(
+        copy.deepcopy(md), solver=solver, solver_tee=False, return_model=True,
+    )
+    store_branch_duals(m, md_sol)
+    return md_sol
+
 REPO_ROOT = Path(__file__).parent.parent
-DEFAULT_CASE = (
-    REPO_ROOT
-    / "Egret/egret/models/tests/transmission_test_instances/test_instances/hvdc_test_case3.json"
-)
+DEFAULT_CASE = REPO_ROOT / "data/case14_gen_per_bus.json"
 DEFAULT_DELTA = 1.0   # MW — comparable to eps so FD spans the barrier smoothing region
 DEFAULT_ATOL  = 0.05  # $/MWh per MW — accommodates O(eps) barrier smoothing at eps=1
 
@@ -91,10 +98,10 @@ def _constraint_slacks(orig: dict, sol: dict) -> dict[str, dict[str, float]]:
     return slacks
 
 
-def _fd_lmp_column(md_base: ModelData, bus_name: str, delta: float) -> dict[str, float]:
+def _fd_lmp_column(md_base: ModelData, bus_name: str, delta: float, solver: str = "gurobi") -> dict[str, float]:
     """Return LMPs of the DCOPF perturbed by +delta MW at bus_name."""
     md_pert = _inject_at_bus(md_base, bus_name, delta)
-    md_pert_sol, _, _ = _dcopf_with_fixed_commitments(md_pert)
+    md_pert_sol = _solve_with_duals(md_pert, solver=solver)
     return _get_lmps(md_pert_sol)
 
 
@@ -102,15 +109,15 @@ def _fd_mu_column(
     md_base: ModelData,
     bus_name: str,
     delta: float,
-    orig: dict,
     mu_base_vals: dict[str, dict[str, float]],
+    solver: str = "gurobi",
 ) -> dict[str, dict[str, float]]:
     """Return FD estimate {key: {name: (μ_pert − μ_base) / delta}} for injection bus."""
     md_pert = _inject_at_bus(md_base, bus_name, delta)
-    md_pert_sol, nu_pert, pf_dual_pert = _dcopf_with_fixed_commitments(md_pert)
+    md_pert_sol = _solve_with_duals(md_pert, solver=solver)
     lmp_pert = _get_lmps(md_pert_sol)
-    _, sol_pert, *_ = _network_state(md_pert, md_pert_sol)
-    mu_pert = _compute_mu_base(orig, sol_pert, lmp_pert, nu_dict=nu_pert, pf_dual_dict=pf_dual_pert)
+    pf_dual_pert = _read_pf_dual_dict(md_pert_sol)
+    mu_pert = _compute_mu_base(md_pert_sol, lmp_pert, pf_dual_pert)
     return {
         key: {name: (mu_pert[key].get(name, 0.0) - v) / delta
               for name, v in base_vals.items()}
@@ -122,6 +129,7 @@ def compare_sensitivity(
     case_path: Path = DEFAULT_CASE,
     delta: float = DEFAULT_DELTA,
     atol: float = DEFAULT_ATOL,
+    solver: str = "gurobi",
 ) -> bool:
     """Run barrier vs FD comparison and return True if all tested entries pass atol.
 
@@ -131,17 +139,18 @@ def compare_sensitivity(
     md = ModelData.read(str(case_path))
 
     print("Solving base DCOPF...")
-    md_sol, nu_dict, pf_dual_dict = _dcopf_with_fixed_commitments(md)
+    md_sol = _solve_with_duals(md, solver=solver)
     lmp_base = _get_lmps(md_sol)
+    pf_dual_dict = _read_pf_dual_dict(md_sol)
     print("Base LMPs ($/MWh):", {b: f"{v:.4f}" for b, v in sorted(lmp_base.items())})
 
     orig, sol, names, *_ = _network_state(md, md_sol)
-    mu_base_vals = _compute_mu_base(orig, sol, lmp_base, nu_dict=nu_dict, pf_dual_dict=pf_dual_dict)
+    mu_base_vals = _compute_mu_base(md_sol, lmp_base, pf_dual_dict)
     slacks = _constraint_slacks(orig, sol)
 
     print("\nComputing barrier sensitivity (eps=1.0)...")
     df_lmp_bar, mu_sens_bar = compute_sensitivity_barrier(
-        md, md_sol, lmp_base, nu_dict=nu_dict, pf_dual_dict=pf_dual_dict
+        md, md_sol, lmp_base, pf_dual_dict
     )
 
     bus_names = names["bus"]
@@ -159,10 +168,10 @@ def compare_sensitivity(
     }
     for j, inj_bus in enumerate(bus_names):
         print(f"  FD perturbing bus {inj_bus} (+{delta:.1f} MW)...")
-        lmp_pert = _fd_lmp_column(md, inj_bus, delta)
+        lmp_pert = _fd_lmp_column(md, inj_bus, delta, solver=solver)
         for i, obs_bus in enumerate(bus_names):
             lmp_fd[i, j] = (lmp_pert[obs_bus] - lmp_base[obs_bus]) / delta
-        fd_mu_col = _fd_mu_column(md, inj_bus, delta, orig, mu_base_vals)
+        fd_mu_col = _fd_mu_column(md, inj_bus, delta, mu_base_vals, solver=solver)
         for key, row_names in dim_map.items():
             for r_i, name in enumerate(row_names):
                 mu_fd[key][r_i, j] = fd_mu_col[key].get(name, 0.0)
@@ -226,9 +235,11 @@ def main():
                         help="FD perturbation in MW (default: 1.0)")
     parser.add_argument("--atol",      type=float, default=DEFAULT_ATOL,
                         help="Absolute tolerance in $/MWh per MW (default: 0.05)")
+    parser.add_argument("--solver",    type=str,   default="gurobi",
+                        help="Pyomo solver name (default: gurobi)")
     args = parser.parse_args()
     passed = compare_sensitivity(
-        Path(args.case), delta=args.delta, atol=args.atol
+        Path(args.case), delta=args.delta, atol=args.atol, solver=args.solver,
     )
     raise SystemExit(0 if passed else 1)
 
