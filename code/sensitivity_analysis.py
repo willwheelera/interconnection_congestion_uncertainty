@@ -33,19 +33,13 @@ import scipy.linalg
 
 from egret.data.model_data import ModelData
 
+from utils.solution_io import get_lmps
+
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 
 EPS_MU = 1.0
 EPS_X = 1.0
-
-def _get_lmps(md_sol) -> dict[str, float]:
-    """Extract {bus_name: lmp} from a solved ModelData."""
-    return {
-        name: bus_data["lmp"]
-        for name, bus_data in md_sol.elements(element_type="bus")
-        if "lmp" in bus_data
-    }
 
 
 def _extract_hour(md: ModelData, hour: int) -> ModelData:
@@ -528,7 +522,7 @@ def _read_pf_dual_dict(md_h: ModelData) -> dict[str, tuple[float, float]]:
 def _run_single(md_h: ModelData, case_stem: str, out_dir: Path = RESULTS_DIR) -> None:
     """Compute and save sensitivity for one scalar-valued ModelData."""
     t1 = time.perf_counter()
-    lmp_base = _get_lmps(md_h)
+    lmp_base = get_lmps(md_h)
     pf_dual_dict = _read_pf_dual_dict(md_h)
     branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
     branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}

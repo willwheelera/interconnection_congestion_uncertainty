@@ -23,20 +23,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from utils.solution_io import (
+    FUEL_LABELS,
+    load_generator_metadata,
+    load_pg,
+    pg_by_fuel,
+)
+
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 DEFAULT_SOLUTION = RESULTS_DIR / "uc_test_scuc_masked.json"
-
-# Human-readable fuel labels
-FUEL_LABELS = {
-    "C": "Coal",
-    "G": "Gas CC",
-    "N": "Nuclear",
-    "O": "Oil / CT",
-    "H": "Hydro",
-    "S": "Solar",
-    "W": "Wind",
-}
 
 # Consistent colors per fuel type
 FUEL_COLORS = {
@@ -68,28 +64,6 @@ def load_total_load(solution_path: Path) -> np.ndarray:
         vals = pl["values"] if isinstance(pl, dict) else [float(pl)] * n_hours
         total += np.array(vals)
     return total
-
-
-def load_pg(solution_path: Path) -> pd.DataFrame:
-    """Return (n_hours × n_generators) DataFrame of pg dispatch in MW."""
-    raw = _read_json(solution_path)
-    gens = raw["elements"]["generator"]
-    n_hours = len(raw["system"]["time_keys"])
-    data = {}
-    for name, g in gens.items():
-        pg = g.get("pg", 0.0)
-        data[name] = pg["values"] if isinstance(pg, dict) else [float(pg)] * n_hours
-    return pd.DataFrame(data, index=range(n_hours))
-
-
-def load_generator_metadata(solution_path: Path) -> pd.DataFrame:
-    """Return DataFrame with 'fuel' and 'generator_type' columns indexed by generator name."""
-    raw = _read_json(solution_path)
-    gens = raw["elements"]["generator"]
-    return pd.DataFrame(
-        {name: {"fuel": g.get("fuel", "?"), "type": g.get("generator_type", "?")}
-         for name, g in gens.items()}
-    ).T
 
 
 def load_lmp_mu(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -156,17 +130,6 @@ def load_branch_slacks(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]
     return slack_df, pf_df
 
 
-def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]:
-    """Aggregate pg by fuel type label, returning {label: hourly_total_MW}."""
-    result = {}
-    for fuel_code, label in FUEL_LABELS.items():
-        gens = meta.index[meta["fuel"] == fuel_code].tolist()
-        cols = [g for g in gens if g in pg_df.columns]
-        if cols:
-            result[label] = pg_df[cols].sum(axis=1)
-    return result
-
-
 def print_df_totals(lmp_df, mu_df):
     lmp_df["total"] = lmp_df.sum(axis=1)
     mu_df["total"] = mu_df.sum(axis=1)
@@ -180,14 +143,15 @@ def print_df_totals(lmp_df, mu_df):
 
 
 def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) -> None:
-    pg_df = load_pg(solution_path)
+    raw = _read_json(solution_path)
+    pg_df = load_pg(raw)
     total_load = load_total_load(solution_path)
-    meta = load_generator_metadata(solution_path)
+    meta = load_generator_metadata(raw)
     lmp_df, mu_df = load_lmp_mu(solution_path)
     slack_df, pf_df = load_branch_slacks(solution_path)
 
     hours = np.arange(len(pg_df))
-    pg_by_fuel = _pg_by_fuel(pg_df, meta)
+    pg_by_fuel_dict = pg_by_fuel(pg_df, meta)
 
     fig, axes = plt.subplots(4, 1, figsize=(8, 7), sharex=True)
 
@@ -201,8 +165,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
         return tuple(b)
 
     if by_fuel_type:
-        labels = list(pg_by_fuel.keys())
-        values = np.array([_f(pg_by_fuel[lab]) for lab in labels])
+        labels = list(pg_by_fuel_dict.keys())
+        values = np.array([_f(pg_by_fuel_dict[lab]) for lab in labels])
         colors = [FUEL_COLORS.get(lab, "grey") for lab in labels]
     else:
         labels = list(pg_df.columns)

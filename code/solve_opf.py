@@ -27,6 +27,8 @@ from math import degrees
 from egret.data.model_data import ModelData
 from egret.models.dcopf import create_btheta_dcopf_model, solve_dcopf
 from egret.common.solver_interface import _solve_model
+
+from utils.availability import avail_to_id, remove_unavailable_generators
 import logging
 logging.getLogger('egret').setLevel(logging.WARNING)
 logging.getLogger('pyomo.core').addFilter(lambda r: getattr(r, 'id', None) != 'W1002')
@@ -42,16 +44,6 @@ def parse_args():
     parser.add_argument("--availability", type=int, nargs="+")
     parser.add_argument("--solver", type=str, default="gurobi")
     return parser.parse_args()
-
-
-def remove_unavailable_generators(md: ModelData, availability: list[int]) -> None:
-    """Delete generators whose availability flag is 0."""
-    gen_names = list(md.data["elements"]["generator"].keys())
-    assert len(availability) == len(gen_names), \
-        f"Availability list length ({len(availability)}) != number of generators ({len(gen_names)})"
-    for name, avail in zip(gen_names, availability):
-        if avail == 0:
-            del md.data["elements"]["generator"][name]
 
 
 def solve_opf(md: ModelData, solver: str = "gurobi") -> tuple[ModelData, pe.ConcreteModel]:
@@ -102,18 +94,13 @@ def create_case(md_ref: ModelData, availability) -> ModelData:
     return md
 
 
-def avail2code(availability):
-    return int("".join(str(b) for b in availability), 2)
-
-
 def result_path(case_path: Path, availability: list[int] | None) -> Path:
     case_id = case_path.stem
     case_dir = case_id.replace(".json", "")
     out_dir = RESULTS_DIR / case_dir
     out_dir.mkdir(exist_ok=True)
     if availability is not None:
-        avail_code = avail2code(availability)
-        return out_dir / f"opf_{case_id}_avail{avail_code}.json.gz"
+        return out_dir / f"opf_{case_id}_avail{avail_to_id(availability)}.json.gz"
     return out_dir / f"opf_{case_id}.json.gz"
 
 
@@ -123,7 +110,7 @@ def run(md, availability, case_path, total_load=None, solver="gurobi"):
     if total_load is None:
         total_load = get_total_load(md)
     if total_cap < total_load:
-        print(f"Skipping {avail2code(availability)} ({np.sum(availability)} gens): load infeasible")
+        print(f"Skipping {avail_to_id(availability)} ({np.sum(availability)} gens): load infeasible")
         return None
 
     md = create_case(md, availability)
@@ -131,7 +118,7 @@ def run(md, availability, case_path, total_load=None, solver="gurobi"):
         md_sol, m = solve_opf(md, solver=solver)
     except Exception as e:
         print(availability)
-        print(avail2code(availability))
+        print(avail_to_id(availability))
         print(e)
         return None
     store_branch_duals(m, md_sol)

@@ -29,6 +29,8 @@ from egret.models.unit_commitment import (
     solve_unit_commitment,
     _save_uc_results,
 )
+
+from utils.availability import avail_to_id, remove_unavailable_generators
 import logging
 logging.getLogger('egret').setLevel(logging.WARNING)
 
@@ -45,18 +47,6 @@ def parse_args():
     parser.add_argument("--availability", type=int, nargs="+",)
     parser.add_argument("--solver", type=str, default="gurobi",)
     return parser.parse_args()
-
-
-def remove_unavailable_generators(md: ModelData, availability: list[int]) -> None:
-    """Delete generators whose availability flag is 0."""
-    gen_names = list(md.data["elements"]["generator"].keys())
-    assert len(availability) == len(gen_names), \
-        f"Availability list length ({len(availability)}) != number of generators ({len(gen_names)})"
-    for name, avail in zip(gen_names, availability):
-        if avail == 0:
-            del md.data["elements"]["generator"][name]
-            #print(f"  Removed unavailable generator: {name}")
-    #print(f"  {len(md.data['elements']['generator'])} generators remaining")
 
 
 def solve_uc(md: ModelData, solver: str = "gurobi") -> ModelData:
@@ -172,10 +162,6 @@ def create_case(md_ref, availability, load_ratio):
     return md
         
     
-def avail2code(availability):
-    return int("".join(str(b) for b in availability), 2)
-
-
 def result_path(case_path: Path, availability: list[int] | None) -> Path:
     """Build the output file path from case name and availability flags."""
     case_id = case_path.stem
@@ -183,8 +169,7 @@ def result_path(case_path: Path, availability: list[int] | None) -> Path:
     out_dir = RESULTS_DIR / case_dir
     out_dir.mkdir(exist_ok=True)
     if availability is not None:
-        avail_code = int("".join(str(b) for b in availability), 2)
-        return out_dir / f"uc_{case_id}_avail{avail_code}.json.gz"
+        return out_dir / f"uc_{case_id}_avail{avail_to_id(availability)}.json.gz"
     return out_dir / f"uc_{case_id}.json.gz"
 
 
@@ -206,7 +191,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     if max_load is None:
         max_load, initial_load = get_load(md)
     if total_cap < max_load:
-        print(f"Skipping {avail2code(availability)} ({np.sum(availability)} gens): max load infeasible")
+        print(f"Skipping {avail_to_id(availability)} ({np.sum(availability)} gens): max load infeasible")
         return None
 
     initial_load = 0.
@@ -218,7 +203,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
     out = result_path(case_path, availability)
     md_sol.write(str(out))
-    #print(f"Result {avail2code(availability)}, avail: {np.sum(availability)}")
+    #print(f"Result {avail_to_id(availability)}, avail: {np.sum(availability)}")
     return out
 
 
