@@ -190,6 +190,5 @@ if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
     case_path = REPO_ROOT / "data" / "case14_gen_per_bus.json"
-    run_nminus1_cases(case_path, 5)
-    run_nminus1_cases(case_path, 6)
+    run_nminus1_cases(case_path, 7)
     print(f"time {time.perf_counter()-t0:.2f}")
