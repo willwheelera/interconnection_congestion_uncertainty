@@ -119,9 +119,13 @@ def build_dual_cache(result_path: Path) -> Path:
 
 
 def load_dual_cache(result_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load cached dual sums from Parquet, rebuilding if missing."""
+    """Load cached dual sums from Parquet, rebuilding if missing or stale."""
     cache = result_path / "dual_cache.parquet"
-    if not cache.exists():
+    stale = not cache.exists() or any(
+        p.stat().st_mtime > cache.stat().st_mtime
+        for p in result_path.glob("*.json.gz")
+    )
+    if stale:
         build_dual_cache(result_path)
     df = pd.read_parquet(cache)
     lmp_all = df["lmp"]
