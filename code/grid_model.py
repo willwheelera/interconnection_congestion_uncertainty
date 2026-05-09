@@ -14,6 +14,13 @@ import json
 # Contains high L4, high L2
 # Contains high ramp rate
 
+PEAK = 180
+PROFILE2 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
+PROFILE4 = np.interp(np.arange(24), [0, 4, 8, 12, 16, 20, 24], [0, 1, 0, 1, 0, 1, 0])
+weight = 0.8
+LOAD2 = (weight * PROFILE2 + 1 - weight) * PEAK
+LOAD4 = (weight * PROFILE4 + 1 - weight) * PEAK
+
 
 def line_model(bus_fr, bus_to, rating=100., angle_lim=90, **kwargs):
     d = {
@@ -121,8 +128,8 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
         d["p_cost"]["values"][i] = [v0, v[1] * v0]
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
-    d["initial_status"] = d["min_up_time"]
-    d["initial_p_output"] = d["shutdown_capacity"]
+    d["initial_status"] = d["min_down_time"]
+    d["initial_p_output"] = 0. #d["shutdown_capacity"]
 
     return d
     
@@ -131,8 +138,8 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
 gen_list = []
 for i in range(2):
     gen_list.extend([
-      generator_model("Bus1", 500.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 80.0, G_TYPE3),
+      generator_model("Bus1", 200.0, G_TYPE1, ramp=0.2),
+      generator_model("Bus2", 50.0, G_TYPE3),
       generator_model("Bus3", 200.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
       generator_model("Bus4", 50.0, G_TYPE3),
     ])
@@ -150,7 +157,7 @@ og_dict = {
       "L23": line_model("Bus2", "Bus3", rating=100.),
       "L34": line_model("Bus3", "Bus4", rating=100.),
       "L41": line_model("Bus4", "Bus1", rating=100.),
-      "L13": line_model("Bus1", "Bus3", rating=30.),
+      "L13": line_model("Bus1", "Bus3", rating=50.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -159,7 +166,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (LOAD_PROFILE * 1.).tolist()
+          "values": (LOAD2).tolist()
         }
       },
       "Load4": {
@@ -167,7 +174,7 @@ og_dict = {
         "in_service": True,
         "p_load": {
           "data_type": "time_series",
-          "values": (np.roll(LOAD_PROFILE*1.5, 2) ).tolist()
+          "values": (LOAD4).tolist()
         }
       }
     }
