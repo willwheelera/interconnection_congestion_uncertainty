@@ -29,21 +29,14 @@ import pandas as pd
 from egret.data.model_data import ModelData
 from egret.models.dcopf import solve_dcopf
 
+from utils.solution_io import get_lmps
+
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 DEFAULT_CASE = (
     REPO_ROOT
     / "Egret/egret/models/tests/transmission_test_instances/test_instances/hvdc_test_case3.json"
 )
-
-
-def _get_lmps(md_sol) -> dict[str, float]:
-    """Extract {bus_name: lmp} from a solved ModelData."""
-    return {
-        name: bus_data["lmp"]
-        for name, bus_data in md_sol.elements(element_type="bus")
-        if "lmp" in bus_data
-    }
 
 
 def _total_load_mw(md: ModelData) -> float:
@@ -109,7 +102,7 @@ def compute_sensitivity_fd(
         print(f"  Auto delta: {delta_mw:.1f} MW (15% of total load)")
 
     md_base_sol = solve_dcopf(copy.deepcopy(md), solver=solver, solver_tee=False)
-    lmp_base = _get_lmps(md_base_sol)
+    lmp_base = get_lmps(md_base_sol)
     bus_names = sorted(lmp_base.keys())
     n = len(bus_names)
 
@@ -120,7 +113,7 @@ def compute_sensitivity_fd(
     sensitivity = np.zeros((n, n))
     for j, inj_bus in enumerate(bus_names):
         print(f"  Perturbing bus {inj_bus} (+{delta_mw:.1f} MW)...")
-        lmp_pert = _get_lmps(
+        lmp_pert = get_lmps(
             solve_dcopf(_inject_at_bus(md, inj_bus, delta_mw), solver=solver, solver_tee=False)
         )
         for i, obs_bus in enumerate(bus_names):

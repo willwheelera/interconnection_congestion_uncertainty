@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import comb
 import itertools
+import concurrent.futures
 
 import pyomo.environ as pe
 
@@ -29,10 +30,14 @@ from egret.models.unit_commitment import (
     _save_uc_results,
 )
 
+from utils.availability import avail_to_id, remove_unavailable_generators
+import logging
+logging.getLogger('egret').setLevel(logging.WARNING)
+
 REPO_ROOT = Path(__file__).parent.parent
 EGRET_DIR = REPO_ROOT / "Egret"
 TEST_CASE = EGRET_DIR / "egret" / "models" / "tests" / "uc_test_instances" / "test_scuc_masked.json"
-RESULTS_DIR = REPO_ROOT / "results" / "many_gen_cases"
+RESULTS_DIR = REPO_ROOT / "results"
 
 
 def parse_args():
@@ -44,25 +49,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def remove_unavailable_generators(md: ModelData, availability: list[int]) -> None:
-    """Delete generators whose availability flag is 0."""
-    gen_names = list(md.data["elements"]["generator"].keys())
-    assert len(availability) == len(gen_names), \
-        f"Availability list length ({len(availability)}) != number of generators ({len(gen_names)})"
-    for name, avail in zip(gen_names, availability):
-        if avail == 0:
-            del md.data["elements"]["generator"][name]
-            #print(f"  Removed unavailable generator: {name}")
-    #print(f"  {len(md.data['elements']['generator'])} generators remaining")
-
-
 def solve_uc(md: ModelData, solver: str = "gurobi") -> ModelData:
     """Solve unit commitment and return the solved ModelData."""
     md_sol = solve_unit_commitment(
         md, solver=solver, mipgap=0.01, timelimit=300, solver_tee=False,
     )
     total_cost = md_sol.data["system"]["total_cost"]
-    print(f"\nObjective value (total cost): ${total_cost:,.2f}")
+    #print(f"\nObjective value (total cost): ${total_cost:,.2f}")
     return md_sol
 
 
@@ -138,8 +131,7 @@ def _store_branch_duals(m, md_fixed: ModelData, md_sol: ModelData) -> None:
 def get_load(md):
     total_load = np.zeros(24)
     for load in md.data["elements"]["load"].values():
-        for i, val in enumerate(load["p_load"]["values"]):
-            total_load[i] += val
+        total_load += np.array(load["p_load"]["values"])
     max_load = total_load.max()
     initial_load = total_load[0]
     return max_load, initial_load
@@ -150,8 +142,13 @@ def get_gen_case(md, av):
     total_cap = 0.
     min_on = 0.
     for w in np.where(av)[0]:
-        total_cap += gen_dict[genkeys[w]]["p_max"]
-        min_on += gen_dict[genkeys[w]]["p_min"]
+        p_max = gen_dict[genkeys[w]]["p_max"]
+        p_min = gen_dict[genkeys[w]]["p_min"]
+        if type(p_max) == dict: # initial val only
+            p_max = p_max["values"][0]
+            p_min = p_min["values"][0]
+        total_cap += p_max
+        min_on += p_min
     return total_cap, min_on
 
 
@@ -159,22 +156,21 @@ def create_case(md_ref, availability, load_ratio):
     md = copy.deepcopy(md_ref)
     remove_unavailable_generators(md, availability)
     for gen in md.data["elements"]["generator"].values():
-        gen["initial_p_output"] = load_ratio * gen["p_max"]
+        gen["initial_p_output"] = 0#gen["p_min"] #max(gen["p_min"], load_ratio * gen["p_max"])
+        if "min_down_time" in gen.keys():
+            gen["initial_status"] = -gen["min_down_time"]
     return md
         
     
-def avail2code(availability):
-    return int("".join(str(b) for b in availability), 2)
-
-
 def result_path(case_path: Path, availability: list[int] | None) -> Path:
     """Build the output file path from case name and availability flags."""
-    RESULTS_DIR.mkdir(exist_ok=True)
     case_id = case_path.stem
+    case_dir = case_id.replace("_uc.json", "").replace(".json", "")
+    out_dir = RESULTS_DIR / case_dir
+    out_dir.mkdir(exist_ok=True)
     if availability is not None:
-        avail_code = int("".join(str(b) for b in availability), 2)
-        return RESULTS_DIR / f"uc_{case_id}_avail{avail_code}.json"
-    return RESULTS_DIR / f"uc_{case_id}.json"
+        return out_dir / f"uc_{case_id}_avail{avail_to_id(availability)}.json.gz"
+    return out_dir / f"uc_{case_id}.json.gz"
 
 
 def main():
@@ -195,7 +191,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     if max_load is None:
         max_load, initial_load = get_load(md)
     if total_cap < max_load:
-        print(f"Skipping {avail2code(availability)} ({availability.sum()}): max load infeasible")
+        print(f"Skipping {avail_to_id(availability)} ({np.sum(availability)} gens): max load infeasible")
         return None
 
     initial_load = 0.
@@ -207,7 +203,7 @@ def run(md, availability, case_path, max_load=None, solver="gurobi"):
     md_sol = solve_dcopf_with_fixed_commitments(md_uc, solver=solver)
     out = result_path(case_path, availability)
     md_sol.write(str(out))
-    print(f"\nResults saved to {out}, avail: {availability.sum()}")
+    #print(f"Result {avail_to_id(availability)}, avail: {np.sum(availability)}")
     return out
 
 
@@ -221,20 +217,54 @@ def run_many_cases(case_path, n_avail=3):
     print(f"Checking {comb(ngen, n_avail):.0f} configs")
 
     viable_configs = 0
-    av = np.zeros(ngen, dtype=int)
-    for indices in itertools.combinations(range(ngen), n_avail):
-        av[:] = 0
-        av[list(indices)] = 1
-        out = run(md, av, case_path)
-        if out:
-            viable_configs += 1
 
-    print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
+    with concurrent.futures.ProcessPoolExecutor() as ex:
+        out = []
+        #for indices in itertools.combinations(range(ngen), n_avail):
+        #    av[:] = 0
+        #    av[list(indices)] = 1
+        for i in range(int(2**ngen)):
+            av = list(map(int, np.binary_repr(i, ngen)))
+            out.append(ex.submit(run, md, av, case_path, max_load=max_load))
+            #out = run(md, av, case_path)
+        for o in out:
+            if o.result():
+                viable_configs += 1
+
+    #print(f"viable {viable_configs} / {comb(ngen, n_avail):.0f}")
+    print(f"viable {viable_configs} / {2**ngen:.0f}")
+
+def run_nminus1_cases(case_path, nremove=1):
+    md = ModelData.read(str(case_path))
+    md.data["elements"]["contingency"] = {}
+    max_load, initial_load = get_load(md)
+
+    gen_dict = md.data["elements"]["generator"]
+    ngen = len(gen_dict)
+    genkeys = list(gen_dict.keys())
+    n_avail = ngen - nremove
+    print(f"Checking {comb(ngen, n_avail):.0f} configs")
+
+    viable_configs = 0
+    total_configs = 0
+
+    with concurrent.futures.ProcessPoolExecutor() as ex:
+        out = []
+        for indices in itertools.combinations(range(ngen), n_avail):
+            av = np.zeros(ngen, dtype=int)
+            av[list(indices)] = 1
+            out.append(ex.submit(run, md, av, case_path))
+        for o in out:
+            total_configs += 1
+            if o.result():
+                viable_configs += 1
+
+    print(f"viable {viable_configs} / {total_configs}")
 
     
 if __name__ == "__main__":
     import time
     t0 = time.perf_counter()
-    case_path = REPO_ROOT / "data" / "many_gen_four_bus_uc.json"
-    run_many_cases(case_path, n_avail=3)
+    case_path = REPO_ROOT / "data" / "case14_gen_per_bus.json"
+    run_nminus1_cases(case_path, 0)
     print(f"time {time.perf_counter()-t0:.2f}")

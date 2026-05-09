@@ -8,11 +8,20 @@ import json
 #    257.6, 249.2, 243.6, 246.4, 257.6, 271.6,
 #    280.0, 274.4, 263.2, 246.4, 218.4, 190.4,
 #])
+shape1 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
+#shape2 = np.interp(np.arange(24), [-1, 3, 11, 15, 23], [0, 1, 0, 1, 0])
+shape2 = np.interp(np.arange(24), [0, 6, 12, 18, 24], [0.2, 1, 0, 1, 0])
+PEAK = 150
+weight = 0.8
+LOAD2 = (weight * shape1 + 1 - weight) * PEAK
+LOAD4 = (weight * shape2 + 1 - weight) * PEAK
+
 
 # Make simple load profile. Properties:
 # Contains high L4, low L2
 # Contains high L4, high L2
 # Contains high ramp rate
+# Start at 0 load.
 
 PEAK = 180
 PROFILE2 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
@@ -114,17 +123,17 @@ G_DEFAULT = {
     "shutdown_cost": 0.0,
 }
 
-def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25, **kwargs):
+def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.25, cost_scale=1.0, **kwargs):
     d = G_DEFAULT.copy()
     d.update(copy.deepcopy(gtype))
 
     d["bus"] = bus
     d["ramp_up_60min"] = d["ramp_down_60min"] = ramp * p_max
-    d["startup_capacity"] = d["shutdown_capacity"] = start_capacity * p_max
+    d["startup_capacity"] = d["shutdown_capacity"] = startup_capacity * p_max
     for i, s in enumerate(d["startup_cost"]):
         d["startup_cost"][i] = [s[0], s[1] * d["startup_capacity"]]
     for i, v in enumerate(d["p_cost"]["values"]):
-        v0 = v[0] * p_max
+        v0 = v[0] * p_max * cost_scale
         d["p_cost"]["values"][i] = [v0, v[1] * v0]
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
@@ -135,13 +144,16 @@ def generator_model(bus, p_max, gtype, ramp=0.5, start_capacity=0.25, p_min=0.25
     
 # Max L4: 190
 # Max L2: 190?
+# what's the point of gens at 2, 4? change voltage. 
+# not interested in infeasible problems: make load penalty 100 instead of large.
 gen_list = []
 for i in range(2):
+    c = 1.0 + 0.01 * i
     gen_list.extend([
-      generator_model("Bus1", 200.0, G_TYPE1, ramp=0.2),
-      generator_model("Bus2", 50.0, G_TYPE3),
-      generator_model("Bus3", 200.0, G_TYPE2, p_min=0.2, ramp=1.0, startup_capacity=0.2),
-      generator_model("Bus4", 50.0, G_TYPE3),
+      generator_model("Bus1", 200.0, G_TYPE1, cost_scale=c, p_min=0.1, ramp=0.2),
+      generator_model("Bus2",  50.0, G_TYPE3, cost_scale=c, p_min=0., startup_capacity=0.4),
+      generator_model("Bus3", 200.0, G_TYPE2, cost_scale=c, p_min=0.1, ramp=1.0, startup_capacity=0.2),
+      generator_model("Bus4",  50.0, G_TYPE3, cost_scale=c, startup_capacity=0.4),
     ])
 
 og_dict = {
@@ -155,9 +167,9 @@ og_dict = {
     "branch": {
       "L12": line_model("Bus1", "Bus2", rating=100.),
       "L23": line_model("Bus2", "Bus3", rating=100.),
-      "L34": line_model("Bus3", "Bus4", rating=100.),
-      "L41": line_model("Bus4", "Bus1", rating=100.),
-      "L13": line_model("Bus1", "Bus3", rating=50.),
+      "L34": line_model("Bus3", "Bus4", rating=103.),
+      "L41": line_model("Bus4", "Bus1", rating=103.),
+      "L13": line_model("Bus1", "Bus3", rating=58.),
     },
     "generator": {f"G{i+1}": g for i, g in enumerate(gen_list)},
     "load": {
@@ -183,7 +195,7 @@ og_dict = {
     "model_name": "many_gen_four_bus_uc",
     "time_keys": [str(i) for i in range(1, 25)],
     "time_period_length_minutes": 60,
-    "load_mismatch_cost": 10000.0,
+    "load_mismatch_cost": 1000.0,
     "reserve_shortfall_cost": 1000.0,
     "baseMVA": 1.0,
     "reference_bus": "Bus1",

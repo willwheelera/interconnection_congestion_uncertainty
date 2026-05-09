@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 
@@ -22,20 +23,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from utils.solution_io import (
+    FUEL_LABELS,
+    load_generator_metadata,
+    load_pg,
+    pg_by_fuel,
+)
+
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 DEFAULT_SOLUTION = RESULTS_DIR / "uc_test_scuc_masked.json"
-
-# Human-readable fuel labels
-FUEL_LABELS = {
-    "C": "Coal",
-    "G": "Gas CC",
-    "N": "Nuclear",
-    "O": "Oil / CT",
-    "H": "Hydro",
-    "S": "Solar",
-    "W": "Wind",
-}
 
 # Consistent colors per fuel type
 FUEL_COLORS = {
@@ -49,26 +46,24 @@ FUEL_COLORS = {
 }
 
 
-def load_pg(solution_path: Path) -> pd.DataFrame:
-    """Return (n_hours × n_generators) DataFrame of pg dispatch in MW."""
-    raw = json.loads(solution_path.read_text())
-    gens = raw["elements"]["generator"]
+def _read_json(path: Path) -> dict:
+    """Read a JSON or gzip-compressed JSON file."""
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt") as f:
+            return json.load(f)
+    return json.loads(path.read_text())
+
+
+def load_total_load(solution_path: Path) -> np.ndarray:
+    """Return total system load (MW) per hour as a 1-D array."""
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
-    data = {}
-    for name, g in gens.items():
-        pg = g.get("pg", 0.0)
-        data[name] = pg["values"] if isinstance(pg, dict) else [float(pg)] * n_hours
-    return pd.DataFrame(data, index=range(n_hours))
-
-
-def load_generator_metadata(solution_path: Path) -> pd.DataFrame:
-    """Return DataFrame with 'fuel' and 'generator_type' columns indexed by generator name."""
-    raw = json.loads(solution_path.read_text())
-    gens = raw["elements"]["generator"]
-    return pd.DataFrame(
-        {name: {"fuel": g.get("fuel", "?"), "type": g.get("generator_type", "?")}
-         for name, g in gens.items()}
-    ).T
+    total = np.zeros(n_hours)
+    for load in raw["elements"]["load"].values():
+        pl = load["p_load"]
+        vals = pl["values"] if isinstance(pl, dict) else [float(pl)] * n_hours
+        total += np.array(vals)
+    return total
 
 
 def load_lmp_mu(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -82,7 +77,7 @@ def load_lmp_mu(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         mu_df   — (n_hours × n_branches) DataFrame of μ ($/MWh),
                   positive = upper limit binding, negative = lower binding
     """
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
     buses = raw["elements"]["bus"]
     branches = raw["elements"]["branch"]
@@ -114,7 +109,7 @@ def load_branch_slacks(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]
 
     slack = rating − |pf| per branch per hour (MW); zero = congested.
     """
-    raw = json.loads(solution_path.read_text())
+    raw = _read_json(solution_path)
     n_hours = len(raw["system"]["time_keys"])
     branches = raw["elements"]["branch"]
 
@@ -135,27 +130,28 @@ def load_branch_slacks(solution_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]
     return slack_df, pf_df
 
 
-def _pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]:
-    """Aggregate pg by fuel type label, returning {label: hourly_total_MW}."""
-    result = {}
-    for fuel_code, label in FUEL_LABELS.items():
-        gens = meta.index[meta["fuel"] == fuel_code].tolist()
-        cols = [g for g in gens if g in pg_df.columns]
-        if cols:
-            result[label] = pg_df[cols].sum(axis=1)
-    return result
+def print_df_totals(lmp_df, mu_df):
+    lmp_df["total"] = lmp_df.sum(axis=1)
+    mu_df["total"] = mu_df.sum(axis=1)
+    print(lmp_df.round(1))
+    print(lmp_df.sum().abs().round(1))
+    print(mu_df.round(1))
+    print(mu_df.sum().abs().round(1))
+    lmp_df.drop(columns="total", inplace=True)
+    mu_df.drop(columns="total", inplace=True)
+    print(((mu_df**2).sum(axis=0)**0.5).round(2))
 
 
 def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) -> None:
-    pg_df = load_pg(solution_path)
-    meta = load_generator_metadata(solution_path)
+    raw = _read_json(solution_path)
+    pg_df = load_pg(raw)
+    total_load = load_total_load(solution_path)
+    meta = load_generator_metadata(raw)
     lmp_df, mu_df = load_lmp_mu(solution_path)
     slack_df, pf_df = load_branch_slacks(solution_path)
-    #print(lmp_df)
-    #print(pf_df)
 
     hours = np.arange(len(pg_df))
-    pg_by_fuel = _pg_by_fuel(pg_df, meta)
+    pg_by_fuel_dict = pg_by_fuel(pg_df, meta)
 
     fig, axes = plt.subplots(4, 1, figsize=(8, 7), sharex=True)
 
@@ -169,8 +165,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
         return tuple(b)
 
     if by_fuel_type:
-        labels = list(pg_by_fuel.keys())
-        values = np.array([_f(pg_by_fuel[lab]) for lab in labels])
+        labels = list(pg_by_fuel_dict.keys())
+        values = np.array([_f(pg_by_fuel_dict[lab]) for lab in labels])
         colors = [FUEL_COLORS.get(lab, "grey") for lab in labels]
     else:
         labels = list(pg_df.columns)
@@ -179,6 +175,7 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
         colors = [_color_f(i/n) for i in range(n)]
         
     ax_pg.stackplot(hours, values, labels=labels, colors=colors, alpha=0.85)
+    ax_pg.plot(hours, total_load, color="black", linewidth=0.5, linestyle="--", label="Load")
     ax_pg.set_ylabel("Dispatch (MW)")
     ax_pg.set_title("Generation dispatch by fuel type")
     ax_pg.legend(loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0, fontsize=8, ncol=2)
@@ -202,8 +199,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
     mu_legend_handles = []
     if not mu_df.empty:
         # Only draw branches that are ever non-zero
-        active = mu_df.columns[(mu_df != 0).any(axis=0)]
-        inactive = mu_df.columns[(mu_df == 0).all(axis=0)]
+        active = mu_df.columns[(mu_df.abs() >= 1e-6).any(axis=0)]
+        inactive = mu_df.columns[(mu_df.abs() < 1e-6).all(axis=0)]
         if len(inactive) > 0:
             h_line, = ax_mu.plot(mu_df.index, np.zeros(len(mu_df)), color="lightgrey",
                                  linewidth=0.5, label=f"{len(inactive)} uncongested")
@@ -225,8 +222,8 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
             ax_slack.plot(slack_df.index, slack_df[br], color=cmap3(i),
                           linewidth=1.2, marker="o", markersize=3, label=br)
         ax_slack.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.6)
-        ax_slack.legend(loc="upper left", bbox_to_anchor=(1.01, 1),
-                        borderaxespad=0, fontsize=8, title="Branches", title_fontsize=8)
+        #ax_slack.legend(loc="upper left", bbox_to_anchor=(1.01, 1),
+        #                borderaxespad=0, fontsize=8, title="Branches", title_fontsize=8)
     ax_slack.set_ylabel("Slack (MW)")
     ax_slack.set_title("Line limit slack (rating − |pf|);  0 = congested")
     ax_slack.set_xlabel("Hour")
@@ -234,7 +231,7 @@ def plot_optimal_values(solution_path: Path, out_path: Path, by_fuel_type=True) 
 
     fig.tight_layout(rect=[0, 0, 0.84, 1])
 
-    if mu_legend_handles:
+    if mu_legend_handles and len(mu_legend_handles) < 20:
         # Anchor flush to actual right edge of axes (after tight_layout moves them)
         pos = ax_mu.get_position()
         fig.legend(
@@ -278,19 +275,22 @@ def main():
     )
     plot_optimal_values(solution_path, out_path, False)
 
-def run(ID):
-    DIR = RESULTS_DIR / "many_gen_cases"
-    solution_path = DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
+def run_8gen(ID):
+    #DIR = RESULTS_DIR / "many_gen_cases"
+    #solution_path = DIR / f"uc_many_gen_four_bus_uc_avail{ID}.json"
+    DIR = RESULTS_DIR / "gen8_four_bus"
+    solution_path = DIR / f"uc_gen8_four_bus_avail{ID}.json"
     out_path = DIR / f"optimal_{solution_path.stem}.pdf"
     plot_optimal_values(solution_path, out_path, False)
+
+def run_egret_test(ID):
+    DIR = RESULTS_DIR / "test_scuc_masked"
+    solution_path = DIR / f"uc_test_scuc_masked_avail{ID}.json"
+    out_path = DIR / f"optimal_{solution_path.stem}.pdf"
+    plot_optimal_values(solution_path, out_path, True)
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         for a in sys.argv[1:]:
-            run(int(a))
-    #run(65535)
-    #run(63282)
-    #run(11778)
-    #run(16394)
-    #run(672)
+            run_egret_test(int(a))

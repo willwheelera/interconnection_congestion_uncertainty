@@ -1,3 +1,4 @@
+import gzip
 import json
 import re
 from pathlib import Path
@@ -5,10 +6,10 @@ from pathlib import Path
 results_dir = Path(__file__).parent.parent / "results" / "many_gen_cases"
 
 n_infeasible = 0
-for path in sorted(results_dir.glob("*.json")):
-    match = re.search(r"avail(\d+)", path.stem)
+for path in sorted(results_dir.glob("*.json.gz")):
+    match = re.search(r"avail(\d+)", path.name.split(".json")[0])
     avail_code = match.group(1) if match else "unknown"
-    with open(path) as f:
+    with gzip.open(path, "rt") as f:
         data = json.load(f)
     total_cost = data["system"]["total_cost"]
     if total_cost < 1131284.:

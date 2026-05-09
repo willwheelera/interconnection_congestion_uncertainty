@@ -33,18 +33,13 @@ import scipy.linalg
 
 from egret.data.model_data import ModelData
 
+from utils.solution_io import get_lmps
+
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
-DEFAULT_SOLUTION = REPO_ROOT / "results" / "uc_test_scuc_masked.json"
 
-
-def _get_lmps(md_sol) -> dict[str, float]:
-    """Extract {bus_name: lmp} from a solved ModelData."""
-    return {
-        name: bus_data["lmp"]
-        for name, bus_data in md_sol.elements(element_type="bus")
-        if "lmp" in bus_data
-    }
+EPS_MU = 1.0
+EPS_X = 1.0
 
 
 def _extract_hour(md: ModelData, hour: int) -> ModelData:
@@ -62,6 +57,14 @@ def _extract_hour(md: ModelData, hour: int) -> ModelData:
         return obj
 
     return ModelData(_resolve(md.data))
+
+
+def _natkey(s: str):
+    """Sort key that orders numeric strings numerically ('2' < '10')."""
+    try:
+        return (0, int(s))
+    except (ValueError, TypeError):
+        return (1, str(s))
 
 
 def _network_state(md, md_sol):
@@ -96,7 +99,7 @@ def _network_state(md, md_sol):
         "branch": dict(md_sol.elements("branch")),
         "dc": dict(md_sol.elements("dc_branch")),
     }
-    names = {k: sorted(v) for k, v in orig.items()}
+    names = {k: sorted(v, key=_natkey) for k, v in orig.items()}
     idx = {k: {name: i for i, name in enumerate(names[k])} for k in names}
     n = {k: len(names[k]) for k in names}
     n_vars = n["bus"] + n["gen"] + n["dc"]
@@ -150,7 +153,7 @@ def _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva):
     return J_pb
 
 
-def _pf_ylim(sol_k, name, data, eps, pf_dual_dict):
+def _pf_ylim(sol_k, name, data, eps_mu, eps_x, pf_dual_dict):
     """Return (y_upper, y_lower) barrier weights for a branch's thermal limits.
 
     Dual estimates z_k are taken from pf_dual_dict (direct LP solver duals),
@@ -160,11 +163,11 @@ def _pf_ylim(sol_k, name, data, eps, pf_dual_dict):
     val = sol_k[name].get("pf", 0.0)
     rating = data["rating_long_term"]
     z_upper, z_lower = pf_dual_dict[name]
-    y_upper = (z_upper + eps) / (max(rating - val, 0.0) + eps)
-    y_lower = (z_lower + eps) / (max(val + rating, 0.0) + eps)
+    y_upper = (z_upper + eps_mu) / (max(rating - val, 0.0) + eps_x)
+    y_lower = (z_lower + eps_mu) / (max(val + rating, 0.0) + eps_x)
     return y_upper, y_lower
 
-def _gen_ylim(sol, lmp_base, g_name, g_data, eps):
+def _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x):
     pg_mw = sol["gen"][g_name].get("pg", 0.0)
     lmp_b = lmp_base.get(g_data["bus"], 0.0)
     mc = _marginal_cost(g_data, pg_mw)
@@ -172,8 +175,8 @@ def _gen_ylim(sol, lmp_base, g_name, g_data, eps):
     pg_min = g_data.get("p_min", 0.0)
     y_max = 0
     if pg_max is not None:
-        y_max = (max(lmp_b - mc, 0.0) + eps) / (max(pg_max - pg_mw, 0.0) + eps)
-    y_min = (max(mc - lmp_b, 0.0) + eps) / (max(pg_mw - pg_min, 0.0) + eps)
+        y_max = (max(lmp_b - mc, 0.0) + eps_mu) / (max(pg_max - pg_mw, 0.0) + eps_x)
+    y_min = (max(mc - lmp_b, 0.0) + eps_mu) / (max(pg_mw - pg_min, 0.0) + eps_x)
     return y_max, y_min
 
 
@@ -216,7 +219,8 @@ def _build_barrier_Y(
     n_vars: int,
     base_mva: float,
     lmp_base: dict[str, float],
-    eps: float,
+    eps_mu: float,
+    eps_x: float,
     pf_dual_dict: dict[str, tuple[float, float]],
 ) -> np.ndarray:
     """Build the barrier regularisation matrix Y in [θ, p_g, dcpf] variable space.
@@ -238,7 +242,7 @@ def _build_barrier_Y(
     Y = np.zeros((n_vars, n_vars))
 
     for g_name, g_data in orig["gen"].items():
-        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps)
+        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x)
         g_col = n["bus"] + idx["gen"][g_name]
         Y[g_col, g_col] += y_max + y_min
 
@@ -248,7 +252,7 @@ def _build_barrier_Y(
         f_i = idx["bus"][br_data["from_bus"]]
         t_i = idx["bus"][br_data["to_bus"]]
         B_l = _branch_susceptance(br_data, base_mva)
-        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps, pf_dual_dict)
+        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps_mu, eps_x, pf_dual_dict)
         y_total = y_upper + y_lower
         # grad pf = B_l * (e_from - e_to); outer product scaled by y_total
         Y[f_i, f_i] += y_total * B_l ** 2
@@ -259,7 +263,7 @@ def _build_barrier_Y(
     for dc_name, dc_data in orig["dc"].items():
         if dc_data.get("rating_long_term") is None:
             continue
-        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps, pf_dual_dict)
+        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps_mu, eps_x, pf_dual_dict)
         d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
         Y[d_col, d_col] += y_upper + y_lower
 
@@ -274,7 +278,8 @@ def _compute_mu_sensitivity(
     n: dict,
     base_mva: float,
     lmp_base: dict[str, float],
-    eps: float,
+    eps_mu: float,
+    eps_x: float,
     primal_sens: np.ndarray,
     pf_dual_dict: dict[str, tuple[float, float]],
 ) -> dict[str, pd.DataFrame]:
@@ -305,7 +310,7 @@ def _compute_mu_sensitivity(
         dtheta_diff = primal_sens[f_i, :] - primal_sens[t_i, :]
 
         B_l = _branch_susceptance(br_data, base_mva)
-        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps, pf_dual_dict)
+        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps_mu, eps_x, pf_dual_dict)
         branch_upper[br_i, :] = -y_upper * B_l * dtheta_diff
         branch_lower[br_i, :] =  y_lower * B_l * dtheta_diff
 
@@ -313,7 +318,7 @@ def _compute_mu_sensitivity(
     gen_min = np.zeros((len(names["gen"]), n["bus"]))
     for g_i, g_name in enumerate(names["gen"]):
         g_data = orig["gen"][g_name]
-        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps)
+        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x)
         dpg = primal_sens[n["bus"] + idx["gen"][g_name], :]
         gen_max[g_i, :] = -y_max * dpg
         gen_min[g_i, :] =  y_min * dpg
@@ -326,7 +331,7 @@ def _compute_mu_sensitivity(
             continue
         d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
         ddcpf = primal_sens[d_col, :]
-        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps, pf_dual_dict)
+        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps_mu, eps_x, pf_dual_dict)
         dc_max[d_i, :] = -y_upper * ddcpf
         dc_min[d_i, :] =  y_lower * ddcpf
 
@@ -345,7 +350,8 @@ def compute_sensitivity_barrier(
     md_sol: ModelData,
     lmp_base: dict[str, float],
     pf_dual_dict: dict[str, tuple[float, float]],
-    eps: float = 1.0,
+    eps_mu: float = 1.0,
+    eps_x: float = 1.0,
     d_w: float = 1e-6,
     d_c: float = 1e-6,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
@@ -411,7 +417,7 @@ def compute_sensitivity_barrier(
         if a2 != 0.0:
             H_diag[n["bus"] + idx["gen"][g_name]] = 2.0 * a2
 
-    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps, pf_dual_dict)
+    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps_mu, eps_x, pf_dual_dict)
 
     J_pb = _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva)
     J_ref = np.zeros((1, n_vars))
@@ -447,7 +453,7 @@ def compute_sensitivity_barrier(
         columns=pd.Index(names["bus"], name="injection_bus (P_j)"),
     )
     mu_sens = _compute_mu_sensitivity(
-        orig, sol, names, idx, n, base_mva, lmp_base, eps, primal_sens, pf_dual_dict
+        orig, sol, names, idx, n, base_mva, lmp_base, eps_mu, eps_x, primal_sens, pf_dual_dict
     )
     return df_lmp, mu_sens
 
@@ -458,6 +464,7 @@ def save_results(
     df_lmp: pd.DataFrame,
     mu_sens: dict[str, pd.DataFrame] | None = None,
     mu_base: dict[str, dict[str, float]] | None = None,
+    out_dir: Path = RESULTS_DIR,
     **extra_fields,
 ) -> Path:
     """Save barrier sensitivity results to results/sensitivity_barrier_<case>.json.
@@ -474,8 +481,8 @@ def save_results(
         Optional dict from :func:`compute_sensitivity_barrier` containing
         dμ_k/dP_j DataFrames keyed by constraint type.
     """
-    RESULTS_DIR.mkdir(exist_ok=True)
-    out_path = RESULTS_DIR / f"sensitivity_barrier_{case_stem}.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"sensitivity_barrier_{case_stem}.json"
     payload = {
         "case": case_stem,
         "method": "barrier",
@@ -512,60 +519,79 @@ def _read_pf_dual_dict(md_h: ModelData) -> dict[str, tuple[float, float]]:
     }
 
 
-def run(
-    solution_path: Path | str = DEFAULT_SOLUTION,
-) -> None:
-    """Load a UC solution with pre-computed duals and compute sensitivity.
+def _run_single(md_h: ModelData, case_stem: str, out_dir: Path = RESULTS_DIR) -> None:
+    """Compute and save sensitivity for one scalar-valued ModelData."""
+    t1 = time.perf_counter()
+    lmp_base = get_lmps(md_h)
+    pf_dual_dict = _read_pf_dual_dict(md_h)
+    branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
+    branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}
+    df_lmp, mu_sens = compute_sensitivity_barrier(md_h, md_h, lmp_base, pf_dual_dict, eps_mu=EPS_MU, eps_x=EPS_X)
+    mu_base = _compute_mu_base(md_h, lmp_base, pf_dual_dict)
+    save_results(
+        case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base,
+        out_dir=out_dir, branch_pf=branch_pf, branch_rating=branch_rating,
+    )
+    print(f"{case_stem} sensitivity {time.perf_counter() - t1:.1f}s")
+
+
+def run(solution_path: Path) -> None:
+    """Load a UC or OPF solution with pre-computed duals and compute sensitivity.
+
+    Auto-detects the solution type: multi-hour UC files have ``time_keys`` in
+    ``system`` and are iterated hour by hour; single-period OPF files (no
+    ``time_keys``) are processed once as-is.
 
     Expects the solution file to contain ``lmp``, ``mu_upper``, ``mu_lower``
-    fields (as produced by ``solve_uc.py``).
-
-    Parameters
-    ----------
-    solution_path:
-        Path to a saved EGRET ModelData JSON (UC result with duals).
+    fields (as produced by ``solve_uc.py`` or ``solve_opf.py``).
     """
-    t0 = time.perf_counter()
     solution_path = Path(solution_path)
     print(f"Loading {solution_path.name}...")
+    out_dir = solution_path.parent
     md_raw = ModelData.read(str(solution_path))
     n_buses = len(dict(md_raw.elements("bus")))
-    n_hours = len(md_raw.data["system"]["time_keys"])
-    print(f"  {n_buses} buses, {n_hours} hours")
+    time_keys = md_raw.data["system"].get("time_keys")
 
-    for hour in [18, 20]:#range(n_hours):
-        t1 = time.perf_counter()
+    # Strip .json/.json.gz suffixes from stem for clean output naming.
+    stem = solution_path.name.replace(".json.gz", "").replace(".json", "")
+
+    if time_keys is None:
+        print(f"  {n_buses} buses, single-period OPF")
+        _run_single(md_raw, stem, out_dir=out_dir)
+        return
+
+    n_hours = len(time_keys)
+    print(f"  {n_buses} buses, {n_hours} hours")
+    for hour in [18, 20]:  # range(n_hours)
         md_h = _extract_hour(md_raw, hour)
         for _, g_data in md_h.elements("generator"):
             if g_data.get("commitment", 1) == 0:
                 g_data["p_min"] = 0.0
                 g_data["p_max"] = 0.0
-        lmp_base = _get_lmps(md_h)
-        pf_dual_dict = _read_pf_dual_dict(md_h)
-        branch_pf = {bn: bd.get("pf") or 0.0 for bn, bd in md_h.elements("branch")}
-        branch_rating = {bn: bd.get("rating_long_term") for bn, bd in md_h.elements("branch")}
-        df_lmp, mu_sens = compute_sensitivity_barrier(md_h, md_h, lmp_base, pf_dual_dict)
-        mu_base = _compute_mu_base(md_h, lmp_base, pf_dual_dict)
-        case_stem = f"{solution_path.stem}_h{hour:02d}"
-        save_results(
-            case_stem, lmp_base, df_lmp, mu_sens=mu_sens, mu_base=mu_base,
-            branch_pf=branch_pf, branch_rating=branch_rating,
-        )
-        print(f"hour {hour} sensitivity {time.perf_counter() - t1:.1f}s")
+        _run_single(md_h, f"{stem}_h{hour:02d}", out_dir=out_dir)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute LMP and congestion-dual sensitivity via barrier method (LP + QP)."
+        description="Compute LMP and congestion-dual sensitivity."
     )
     parser.add_argument(
-        "--solution",
+        "ID",
         type=str,
-        default=str(DEFAULT_SOLUTION),
-        help="Path to a saved EGRET ModelData JSON solution file (with duals from solve_uc.py).",
+        nargs="?",
+        default="16383",
+        help="ID of solution file",
+    )
+    parser.add_argument(
+        "--dir",
+        type=str,
+        default="case14_gen_per_bus",
+        help="directory name",
     )
     args = parser.parse_args()
-    run(solution_path=args.solution)
+    solution_name = f"opf_{args.dir}_avail{args.ID}.json.gz"
+    solution_path = RESULTS_DIR / args.dir / solution_name
+    run(solution_path)
 
 
 if __name__ == "__main__":
