@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
+    #mu_df = pd.read_parquet(REPO_ROOT / "results" / "fake_data" / "dual_cache.parquet")
     S = mu_df.sum(axis=1)
     m, s = true_average(S)
     print(f"true avg {m:.3f} {s:.3f}")
