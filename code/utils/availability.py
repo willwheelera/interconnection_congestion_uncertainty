@@ -2,8 +2,6 @@
 
 import numpy as np
 
-from egret.data.model_data import ModelData
-
 
 def avail_to_id(availability) -> int:
     """Encode a 0/1 availability vector as an integer (MSB = first generator)."""
@@ -16,7 +14,7 @@ def id_to_avail(avail_id: int, ngen: int) -> np.ndarray:
     return np.array(list(np.binary_repr(avail_id, ngen)), dtype=np.int8)
 
 
-def remove_unavailable_generators(md: ModelData, availability) -> None:
+def remove_unavailable_generators(md, availability) -> None:
     """Delete generators whose availability flag is 0."""
     gen_names = list(md.data["elements"]["generator"].keys())
     assert len(availability) == len(gen_names), \

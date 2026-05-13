@@ -23,6 +23,13 @@ LOAD4 = (weight * shape2 + 1 - weight) * PEAK
 # Contains high ramp rate
 # Start at 0 load.
 
+PEAK = 180
+PROFILE2 = np.interp(np.arange(24), [0, 12, 24], [0, 1, 0])
+PROFILE4 = np.interp(np.arange(24), [0, 4, 8, 12, 16, 20, 24], [0, 1, 0, 1, 0, 1, 0])
+weight = 0.8
+LOAD2 = (weight * PROFILE2 + 1 - weight) * PEAK
+LOAD4 = (weight * PROFILE4 + 1 - weight) * PEAK
+
 
 def line_model(bus_fr, bus_to, rating=100., angle_lim=90, **kwargs):
     d = {
@@ -130,8 +137,8 @@ def generator_model(bus, p_max, gtype, ramp=0.5, startup_capacity=0.25, p_min=0.
         d["p_cost"]["values"][i] = [v0, v[1] * v0]
     d["p_min"] = p_min * p_max
     d["p_max"] = p_max
-    d["initial_status"] = d["min_up_time"]
-    d["initial_p_output"] = d["shutdown_capacity"]
+    d["initial_status"] = d["min_down_time"]
+    d["initial_p_output"] = 0. #d["shutdown_capacity"]
 
     return d
     
