@@ -15,26 +15,20 @@ LOGQ = np.log(1 - BERNOULLI_PARAMETERS)
 
 REPO_ROOT = Path(__file__).parent.parent
 
-def mrf(X, a, b):
-    B = np.zeros((len(a), len(a)))
-    B[np.triu_indices(len(a), 1)] = b
-    return X @ a + np.einsum("ni,ij,nj->n", X, B, X)
-
-
 def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
     S = mu_df.sum(axis=1)
-    a = np.random.random(NGEN)
-    b = np.random.random(NGEN * (NGEN-1) // 2)
-    data = np.load("mrf_parameters.npz")
-    a, b = data["a"], data["b"]
-    #a, b = cross_entropy_optimization(S, a, b, n_iter=40, tstep=50.0)
-    #a, b = cross_entropy_optimization(S, a, b, n_iter=80, tstep=25.0)
-    #a, b = cross_entropy_optimization(S, a, b, n_iter=1000, tstep=10.0)
 
-    #h = direct_optimization(S, a, b)
-    #a, b = h[:NGEN], h[NGEN:]
-    np.savez("mrf_parameters.npz", a=a, b=b)
+    fname = "mrf_var_parameters.npz"
+    if not (Path(__file__).parent / fname).exists():
+        a = np.random.random(NGEN)
+        b = np.random.random(NGEN * (NGEN-1) // 2)
+        h = direct_optimization(S, a, b)
+        a, b = h[:NGEN], h[NGEN:]
+        np.savez(fname, a=a, b=b)
+
+    data = np.load(fname)
+    a, b = data["a"], data["b"]
     compare_q(S, a, b)
 
 def compare_q(S, a, b):
@@ -68,13 +62,13 @@ def calc_stddev(p, est):
     
 
 def direct_optimization(S, a0, b0):
-    print("Initializing optimization")
+    print("Initializing optimization", flush=True)
     t0 = time.perf_counter()
-    ce_func = CrossEntropy(S)
+    #func = CrossEntropy(S)
+    func = EstVariance(S)
     cb_func = CallbackFn()
     h0 = np.concatenate([a0, b0])
-    print("calling scipy")
-    res = scipy.optimize.minimize(ce_func, h0, callback=cb_func, jac=True)
+    res = scipy.optimize.minimize(func, h0, callback=cb_func, jac=True)
     print(res.success)
     print(res.message)
     print(f"optimization time {time.perf_counter()-t0:.3f}")
@@ -95,22 +89,47 @@ class CallbackFn:
             print(f"{s_iter} {s_val} {s_time}")
 
 
+class EstVariance:
+    def __init__(self, S):
+        self.f = S.values
+        self.allowed = np.isin(np.arange(int(2**NGEN)), S.index)
+        self.X_all = all_vectors(NGEN)
+        self.X = self.X_all[self.allowed]
+        self.p = full_p(self.X)
+        self.M = self.p @ self.f
+        print(f"Mean M: {self.M}")
+        
+    def __call__(self, h):
+        a, b = h[:NGEN], h[NGEN:]
+        q = full_q(self.X_all, a, b)
+        y = (self.p * self.f)**2 / q[self.allowed]
+        V = np.sum(y) - self.M**2
+
+        Eqi = np.einsum("n,ni->i", q, self.X_all)
+        Eqij = np.einsum("n,ni,nj->ij", q, self.X_all, self.X_all)
+        grad_a = -y @ (self.X - Eqi)
+        grad_b = -np.einsum("n,ni,nj->ij", y, self.X, self.X) + y.sum() * Eqij
+
+        triu_i = np.triu_indices(NGEN, 1)
+        grad_h = np.concatenate([grad_a, grad_b[triu_i]])
+        return V, grad_h
+
 class CrossEntropy:
     def __init__(self, S):
-        self.S = S
+        self.f = S.values
         self.X_all = all_vectors(NGEN)
         self.allowed = np.isin(np.arange(int(2**NGEN)), S.index)
         self.X = self.X_all[self.allowed]
         self.p = full_p(self.X)
-        self.Epi = np.einsum("n,n,ni->i", self.p, S.values, self.X)
-        self.Epij = np.einsum("n,n,ni,nj->ij", self.p, S.values, self.X, self.X)
-        self.M = self.p @ S.values
+        self.Epi = np.einsum("n,n,ni->i", self.p, self.f, self.X)
+        self.Epij = np.einsum("n,n,ni,nj->ij", self.p, self.f, self.X, self.X)
+        self.M = self.p @ self.f
         
 
     def __call__(self, h):
         a, b = h[:NGEN], h[NGEN:]
         q = full_q(self.X_all, a, b)
-        val = -np.einsum("n,n,n->", self.p, self.S.values, np.log(q[self.allowed]))
+        val = -np.einsum("n,n,n->", self.p, self.f, np.log(q[self.allowed]))
 
         Eqi = np.einsum("n,ni->i", q, self.X_all)
         Eqij = np.einsum("n,ni,nj->ij", q, self.X_all, self.X_all)
@@ -121,53 +140,27 @@ class CrossEntropy:
         return val, -grad
     
 
-def cross_entropy_optimization(S, a0, b0, n_iter=10, tstep=0.01):
-    X_all = all_vectors(NGEN)
-    allowed = np.isin(np.arange(len(X_all)), S.index)
-    X = X_all[allowed]
-    p = full_p(X)
-    M = p @ S.values
-    Epi = np.einsum("n,n,ni->i", p, S.values, X)
-    Epij = np.einsum("n,n,ni,nj->ij", p, S.values, X, X)
-
-    a = a0.copy()
-    b = b0.copy()
-    triu_i = np.triu_indices(NGEN, 1)
-    tmp = np.zeros((len(X), len(b)))
-    for i in range(n_iter):
-        q = full_q(X_all, a, b)
-        Eqi = np.einsum("n,ni->i", q, X_all)
-        Eqij = np.einsum("n,ni,nj->ij", q, X_all, X_all)
-        grad_a = Epi - M * Eqi
-        grad_b = (Epij - M * Eqij)[triu_i]
-        var_a = p @ (S.values[:, np.newaxis] * (X - Eqi) - grad_a)**2
-        for h, (j, k) in enumerate(zip(*triu_i)):
-            tmp[:, h] = X[:, j] * X[:, k] - Eqij[j, k]
-        var_b = p @ (S.values[:, np.newaxis] * tmp - grad_b)**2
-        dir_a = grad_a / (var_a + 1e-3)
-        dir_b = grad_b / (var_b + 1e-3)
-        a += dir_a * tstep
-        b += dir_b * tstep
-        if (i+1) % (n_iter // 10) == 0:
-            print(f"Step {i}:  {np.einsum("n,n,n->", p, S.values, np.log(q[allowed])):.3f}")
-            print(f"    grad_a {np.linalg.norm(grad_a):.3f}")
-            print(f"    grad_b {np.linalg.norm(grad_b):.3f}")
-        
-    return a, b
+def mrf(X, a, b):
+    B = np.zeros((len(a), len(a)))
+    B[np.triu_indices(len(a), 1)] = b
+    return X @ a + np.einsum("ni,ij,nj->n", X, B, X)
 
 
 def full_q(X, a, b):
-    q = np.exp(mrf(X, a, b))
+    logq = mrf(X, a, b)
+    logq -= np.amax(logq)
+    q = np.exp(logq)
     return q / q.sum()
 
 def full_p(X):
     p = np.exp(X @ LOGP + (1 - X) @ LOGQ)
     return p / p.sum()
 
+
 def all_vectors(n):
-    A = np.arange(int(2**n), dtype=int)
-    powers = (2**np.arange(n)).astype(int)
-    return (A[:, np.newaxis] // powers[::-1]) % 2 
+    powers = (2 ** np.arange(n)).astype(int)
+    index = np.arange(int(2 ** n), dtype=int)
+    return ((index[:, np.newaxis] & powers[::-1]) != 0).astype(int) # all possible availability vectors
 
 if __name__ == "__main__":
     run()
