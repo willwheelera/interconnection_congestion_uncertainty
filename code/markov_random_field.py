@@ -9,7 +9,8 @@ from plot_dual_distributions import load_dual_cache
 
 
 NGEN = 14
-BERNOULLI_PARAMETERS = np.full(NGEN, 0.1)
+P_BERNOULLI = 0.1
+BERNOULLI_PARAMETERS = np.full(NGEN, P_BERNOULLI)
 LOGP = np.log(BERNOULLI_PARAMETERS)
 LOGQ = np.log(1 - BERNOULLI_PARAMETERS)
 
@@ -17,20 +18,37 @@ REPO_ROOT = Path(__file__).parent.parent
 
 def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
-    S = mu_df.sum(axis=1)
+    S = mu_df.sum(axis=1).sort_index()
 
-    fname = "mrf_var_parameters.npz"
+    fname = f"mrf_var_parameters_{P_BERNOULLI}.npz"
     if not (Path(__file__).parent / fname).exists():
-        a = np.random.random(NGEN)
-        b = np.random.random(NGEN * (NGEN-1) // 2)
+        a = np.zeros(NGEN)
+        b = np.zeros(NGEN * (NGEN-1) // 2)
         h = direct_optimization(S, a, b)
         a, b = h[:NGEN], h[NGEN:]
         np.savez(fname, a=a, b=b)
 
     data = np.load(fname)
     a, b = data["a"], data["b"]
+    for k, v in zip("ab", [a, b]):
+        print(f"||{k}|| {np.linalg.norm(v):.2f} \t max |{k}| {np.max(np.abs(v)):.2f}")
     compare_q(S, a, b)
 
+
+def direct_optimization(S, a0, b0):
+    print("Initializing optimization", flush=True)
+    t0 = time.perf_counter()
+    #func = CrossEntropy(S)
+    func = EstVariance(S)
+    cb_func = CallbackFn()
+    h0 = np.concatenate([a0, b0])
+    res = scipy.optimize.minimize(func, h0, callback=cb_func, jac=True)
+    print(res.success)
+    print(res.message)
+    print(f"optimization time {time.perf_counter()-t0:.3f}")
+    return res.x
+    
+    
 def compare_q(S, a, b):
     X_all = all_vectors(NGEN)
     allowed = np.isin(np.arange(len(X_all)), S.index)
@@ -57,24 +75,11 @@ def compare_q(S, a, b):
 
 def calc_stddev(p, est):
     m = p @ est
-    v = p @ (est - m)**2
+    v = p @ est**2 - m**2
+    print("var", v)
     return np.sqrt(v)
     
 
-def direct_optimization(S, a0, b0):
-    print("Initializing optimization", flush=True)
-    t0 = time.perf_counter()
-    #func = CrossEntropy(S)
-    func = EstVariance(S)
-    cb_func = CallbackFn()
-    h0 = np.concatenate([a0, b0])
-    res = scipy.optimize.minimize(func, h0, callback=cb_func, jac=True)
-    print(res.success)
-    print(res.message)
-    print(f"optimization time {time.perf_counter()-t0:.3f}")
-    return res.x
-    
-    
 class CallbackFn:
     def __init__(self):
         self.t0 = time.perf_counter()
