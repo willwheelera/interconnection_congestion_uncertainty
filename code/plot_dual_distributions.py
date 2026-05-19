@@ -63,10 +63,10 @@ def load_all_duals(result_path) -> tuple[pd.DataFrame, pd.DataFrame]:
         for load in raw["elements"]["load"].values():
             total_load += np.array(_hourly(load["p_load"], n_hours))
 
-        if not np.allclose(total_gen, total_load, rtol=1e-6, atol=1e-6):
-            skipped += 1
-            print(f"Skipping {avail_id}")
-            continue
+        #if not np.allclose(total_gen, total_load, rtol=1e-6, atol=1e-6):
+        #    skipped += 1
+        #    print(f"Skipping {avail_id}")
+        #    continue
 
         lmp_sum = {}
         for name, b in raw["elements"]["bus"].items():
