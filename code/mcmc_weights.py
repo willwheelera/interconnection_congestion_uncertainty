@@ -28,12 +28,16 @@ def run():
     print(f"true avg {m:.3f} {s:.3f}")
 
     x0 = id_to_avail(16383, NGEN)
-    trace, weights, acc = run_mc(x0, S, n_iter=2000)
+    trace, weights, acc = run_mc_w(x0, S, n_iter=200)
+    x0 = id_to_avail(16383, NGEN)
+    trace_p, acc = run_mc_p(x0, S, n_iter=200)
     print(f"acceptance {acc:.2f}")
     plot_results(trace, weights)
+    plot_results(trace_p, np.ones(len(trace)))
+    plt.show()
 
 
-def run_mc(x0, df, n_iter=100):
+def run_mc_w(x0, df, n_iter=100):
     x = x0
     trace = np.zeros((n_iter, 2))
     weights = np.ones(n_iter)
@@ -47,19 +51,18 @@ def run_mc(x0, df, n_iter=100):
 
 
 def move_w(x, w, df):
-    x_ = propose_move(x, 0.5)
-
-    rp = p_ratio(x, x_, df.index)
-    A = np.minimum(1.0, rp)
-
     v1 = df[avail_to_id(x)]
-    if A == 0:
-        return x, 1.0, [v1, v1], 0
+    x_ = propose_move(x, 0.1)
+    rp = p_ratio(x, x_, df.index)
+    if rp == 0:
+        return x, w, [v1, v1], 0
 
+    A = rp / (1 + rp)
     v2 = df[avail_to_id(x_)]
     y2 = (1-A)*v1 + A * v2
-    f_ratio = v2 / v1
-    Af = np.minimum(1.0, rp * f_ratio)
+    f_ratio = (v2 / v1) **0.5
+    #Af = np.minimum(1.0, rp * f_ratio)
+    Af = rp * f_ratio / (1 + rp * f_ratio)
 
     accept = Af > np.random.random()
     if accept:
@@ -71,6 +74,39 @@ def move_w(x, w, df):
         y1 = v1
         w_new = w * (1 - A) / (1 - Af)
     return x_new, w_new, [y1, y2], accept
+
+
+def run_mc_p(x0, df, n_iter=100):
+    x = x0
+    trace = np.zeros((n_iter, 2))
+    acceptance = 0.0
+    for i in range(n_iter):
+        x, val, a = move_p(x, df)
+
+        acceptance += a / n_iter
+        trace[i] = val
+    return trace, acceptance
+
+
+def move_p(x, df):
+    x_ = propose_move(x, 0.5)
+
+    rp = p_ratio(x, x_, df.index)
+    A = np.minimum(1.0, rp)
+
+    v1 = df[avail_to_id(x)]
+    y1 = y2 = v1
+    x_new = x
+    acc = 0
+    if A > 0:
+        v2 = df[avail_to_id(x_)]
+        y2 = (1-A)*v1 + A * v2
+        check = np.random.random()
+        if A > check:
+            x_new = x_
+            y1 = v2
+            acc = 1
+    return x_new, [y1, y2], A
 
 
 def p_ratio(x, x_, allowed):
@@ -131,15 +167,17 @@ def plot_results(trace, weights):
         err = sem(_reblock(trace, nblocks, weights), axis=0)
         print(f"err {nblocks} blocks: {err[0]:.3f} {err[1]:.3f}")
 
-    trace_mean = np.cumsum((trace.T*weights)[::-1], axis=1) / np.cumsum(weights[::-1])
-    plt.plot(trace, lw=0.2)
-    plt.plot(trace_mean[::-1].T)
-    plt.plot(np.linspace(0, len(trace), 100), _reblock(trace, 100, weights))
+    trace_mean = np.cumsum((trace.T*weights)[:, ::-1], axis=1) / np.cumsum(weights[::-1])
+
+    plt.figure()
+    plt.plot(trace, lw=0.2, label="trace")
+    plt.plot(trace_mean[:, ::-1].T, label="trace_mean")
+    plt.plot(np.linspace(0, len(trace), 100), _reblock(trace, 100, weights), label="reblocked")
+    plt.legend()
 
     plt.figure()
     plt.plot(weights)
     plt.title("weights")
-    plt.show()
 
 
 if __name__ == "__main__":
