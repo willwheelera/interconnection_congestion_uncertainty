@@ -19,6 +19,7 @@ import numpy as np
 from scipy.special import comb
 import itertools
 import concurrent.futures
+import time
 
 import pyomo.environ as pe
 from pyomo.environ import value
@@ -49,7 +50,11 @@ def parse_args():
 def solve_opf(md: ModelData, solver: str = "gurobi") -> tuple[ModelData, pe.ConcreteModel]:
     """Solve DCOPF and return (solved ModelData, pyomo model)."""
     md_sol, m = solve_dcopf(
-        md, solver=solver, solver_tee=False, return_model=True,
+        md,
+        solver=solver,
+        solver_tee=False,
+        return_model=True,
+        include_feasibility_slack=True,
     )
     return md_sol, m
 
@@ -107,11 +112,11 @@ def result_path(case_path: Path, availability: list[int] | None) -> Path:
 def run(md, availability, case_path, total_load=None, solver="gurobi"):
     total_cap, min_on = get_gen_capacity(md, availability)
 
-    if total_load is None:
-        total_load = get_total_load(md)
-    if total_cap < total_load:
-        print(f"Skipping {avail_to_id(availability)} ({np.sum(availability)} gens): load infeasible")
-        return None
+    #if total_load is None:
+    #    total_load = get_total_load(md)
+    #if total_cap < total_load:
+    #    print(f"Skipping {avail_to_id(availability)} ({np.sum(availability)} gens): load infeasible")
+    #    return None
 
     md = create_case(md, availability)
     try:
@@ -146,6 +151,10 @@ def run_many_cases(case_path, solver="gurobi"):
     print(f"Checking {2**ngen} configs")
 
     viable_configs = 0
+    total_configs = 0
+    
+    t0 = time.perf_counter()
+    times = []
 
     with concurrent.futures.ProcessPoolExecutor() as ex:
         out = []
@@ -153,16 +162,25 @@ def run_many_cases(case_path, solver="gurobi"):
             av = list(map(int, np.binary_repr(i, ngen)))
             out.append(ex.submit(run, md, av, case_path, total_load=total_load, solver=solver))
         for o in out:
+            total_configs += 1
             if o.result():
                 viable_configs += 1
 
-    print(f"viable {viable_configs} / {2**ngen}")
+            # Print progress
+            times.append(time.perf_counter() - t0)
+            if (total_configs) % 100 == 0:
+                print(f"{total_configs:>5d} ({viable_configs:>5d}) time:", end="  ")
+                for t in times:
+                    print(f"{t:.1f}", end="  ")
+                print()
+                times = []
+
+    print(f"viable {viable_configs} / {total_configs}")
 
 
 def run_nminus1_cases(case_path, nremove=1, solver="gurobi"):
     md = ModelData.read(str(case_path))
     md.data["elements"]["contingency"] = {}
-    total_load = get_total_load(md)
 
     gen_dict = md.data["elements"]["generator"]
     ngen = len(gen_dict)
@@ -187,8 +205,8 @@ def run_nminus1_cases(case_path, nremove=1, solver="gurobi"):
 
 
 if __name__ == "__main__":
-    import time
     t0 = time.perf_counter()
     case_path = REPO_ROOT / "data" / "case14_gen_per_bus.json"
-    run_nminus1_cases(case_path, 7)
+    run_many_cases(case_path)
+    #run_nminus1_cases(case_path, 7)
     print(f"time {time.perf_counter()-t0:.2f}")
