@@ -30,6 +30,7 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - Functions are preferred to be around 50 lines long. Longer functions are discouraged, when possible.
 - Do not plan for every possible case. If arguments do not conform to expectations, allow the program to error out instead of providing backup options. This makes code more direct, concise, and readable.
 - Never ask for interactive inputs in python scripts
+- If a python file has a main() function, it should be concise and contain exclusively organizational logic of the program. All specific tasks, such as plot formatting, should be implemented in other functions dedicated to those purposes.
 
 ### Writing style
 
