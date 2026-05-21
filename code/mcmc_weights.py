@@ -23,23 +23,27 @@ REPO_ROOT = Path(__file__).parent.parent
 def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
     #mu_df = pd.read_parquet(REPO_ROOT / "results" / "fake_data" / "dual_cache.parquet")
-    S = mu_df.sum(axis=1)
-    m, s = true_average(S)
-    print(f"true avg {m:.3f} {s:.3f}")
+    #S = mu_df.sum(axis=1)
+    #m, s = true_average(S)
+    #print(f"true avg {m:.3f} {s:.3f}")
 
     x0 = id_to_avail(16383, NGEN)
-    trace, weights, acc = run_mc_w(x0, S, n_iter=200)
+    trace, weights, acc = run_mc_w(x0, mu_df, n_iter=200)
     x0 = id_to_avail(16383, NGEN)
-    trace_p, acc = run_mc_p(x0, S, n_iter=200)
+    trace_p, acc = run_mc_p(x0, mu_df, n_iter=200)
     print(f"acceptance {acc:.2f}")
-    plot_results(trace, weights)
-    plot_results(trace_p, np.ones(len(trace)))
+    plot_threshold_results(mu_df, trace, weights)
+    plot_threshold_results(mu_df, trace_p, np.ones(len(trace)))
     plt.show()
+
+
+def target_threshold(df, x, threshold=300.):
+    return df[avail_to_id(x)].values > threshold
 
 
 def run_mc_w(x0, df, n_iter=100):
     x = x0
-    trace = np.zeros((n_iter, 2))
+    trace = np.zeros((n_iter, 2, df.shape[1]))
     weights = np.ones(n_iter)
     w = 1.0
     acceptance = 0.0
@@ -50,17 +54,22 @@ def run_mc_w(x0, df, n_iter=100):
     return trace, weights, acceptance
 
 
+def target_threshold(df, x, mu=100):
+    row = df.loc[avail_to_id(x)].values
+    return (row > mu).astype(int), row.sum()
+
+
 def move_w(x, w, df):
-    v1 = df[avail_to_id(x)]
+    v1, v1s = target_threshold(df, x)
     x_ = propose_move(x, 0.1)
     rp = p_ratio(x, x_, df.index)
     if rp == 0:
         return x, w, [v1, v1], 0
 
     A = rp / (1 + rp)
-    v2 = df[avail_to_id(x_)]
+    v2, v2s = target_threshold(df, x_)
     y2 = (1-A)*v1 + A * v2
-    f_ratio = (v2 / v1) **0.5
+    f_ratio = ((v2s + 1e-1) / (v1s + 1e-1)) **0.5
     #Af = np.minimum(1.0, rp * f_ratio)
     Af = rp * f_ratio / (1 + rp * f_ratio)
 
@@ -78,7 +87,7 @@ def move_w(x, w, df):
 
 def run_mc_p(x0, df, n_iter=100):
     x = x0
-    trace = np.zeros((n_iter, 2))
+    trace = np.zeros((n_iter, 2, df.shape[1]))
     acceptance = 0.0
     for i in range(n_iter):
         x, val, a = move_p(x, df)
@@ -94,12 +103,12 @@ def move_p(x, df):
     rp = p_ratio(x, x_, df.index)
     A = np.minimum(1.0, rp)
 
-    v1 = df[avail_to_id(x)]
+    v1, _ = target_threshold(df, x)
     y1 = y2 = v1
     x_new = x
     acc = 0
     if A > 0:
-        v2 = df[avail_to_id(x_)]
+        v2, _ = target_threshold(df, x_)
         y2 = (1-A)*v1 + A * v2
         check = np.random.random()
         if A > check:
@@ -121,15 +130,10 @@ def p_ratio(x, x_, allowed):
     # logratio = d log p - d log (1-p)
 
 
-def _new_prob(x, p_flip):
-    return p_flip + x * (1 - 2 * p_flip)
-    # = p_flip * (1 - 2*x) + x
-
-
 def propose_move(x, p_flip=0.1):
     # This move is symmetric
-    p = _new_prob(x, p_flip)
-    xnew = np.random.random(len(x)) < p
+    new_p = p_flip + x * (1 - 2 * p_flip)
+    xnew = np.random.random(len(x)) < new_p
     return xnew.astype(int)
 
 
@@ -139,7 +143,7 @@ def _reblock(array, nblocks, weights=None):
     vals = np.array_split(array, nblocks, axis=0)
     weights = np.array_split(weights, nblocks, axis=0)
     # The transposes are to use the broadcast rules of numpy in the case of vector data
-    return [(v.T * w.T).T.mean(axis=0) / w.mean(axis=0) for v, w in zip(vals, weights)]
+    return np.array([(v.T * w.T).T.mean(axis=0) / w.mean(axis=0) for v, w in zip(vals, weights)])
 
 
 def bernoulli_prob(x):
@@ -148,18 +152,42 @@ def bernoulli_prob(x):
 
 def true_average(S):
     N = len(S)
-    m = 0.0
-    v = 0.0
+    S.index = S.index.astype(int)
+    m = pd.Series(index=S.columns, data=0.0) # if S has columns
+    v = pd.Series(index=S.columns, data=0.0)
     norm = 0.0
-    for index, value in S.items():
+    for index, value in S.iterrows():
         a = id_to_avail(index, NGEN)
         p = bernoulli_prob(a)
-        m += p * value
-        v += p * value**2
+        f = (value > 100).astype(int)
+        m += p * f
+        v += p * f**2
         norm += p
     var = v / norm - (m / norm) ** 2
     return m / norm, np.sqrt(var)
 
+
+def plot_threshold_results(df, trace, weights):
+    avg = np.average(trace[100:], axis=0, weights=weights[100:])
+    print("avg", np.around(avg, 3))
+    mean, sdev = true_average(df)
+
+    fig, axs = plt.subplots(4, 5, figsize=(8, 6))
+    rb = _reblock(trace, 100, weights)
+    trace_mean = np.cumsum((trace.T*weights)[..., ::-1], axis=-1) / np.cumsum(weights[::-1])
+    for i, ax in enumerate(axs.ravel()):
+        ax.plot(trace[:, :, i], lw=0.2, label="trace")
+        #x = np.linspace(0, trace.shape[0], 100)
+        #ax.plot(x, rb[:, :, i], label="reblocked")
+        ax.plot(trace_mean[i].T[::-1], label="trace_mean", lw=0.2)
+        ax.axhline(mean[str(i+1)], lw=0.2, c="k", ls=":")
+    plt.legend()
+
+    plt.figure()
+    plt.plot(weights)
+    plt.title("weights")
+
+    
 
 def plot_results(trace, weights):
     print("avg", np.average(trace[100:], axis=0, weights=weights[100:]))
