@@ -20,7 +20,7 @@ def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
     S = mu_df.sum(axis=1).sort_index()
 
-    fname = f"mrf_var_parameters_{P_BERNOULLI}.npz"
+    fname = f"cached_files/mrf_var_parameters_{P_BERNOULLI}.npz"
     if not (Path(__file__).parent / fname).exists():
         a = np.zeros(NGEN)
         b = np.zeros(NGEN * (NGEN-1) // 2)
