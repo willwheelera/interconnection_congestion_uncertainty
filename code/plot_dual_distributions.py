@@ -166,7 +166,7 @@ def _annotate_marginal_counts(ax: plt.Axes, orient: str) -> None:
 
 
 def main(result_path):
-    lmp_all, mu_all = load_dual_cache(result_path)
+    lmp_all, mu_all = load_dual_cache(result_path / "dual_cache.parquet")
     n_scenarios = len(lmp_all)
     print(f"Loaded {n_scenarios} scenarios (duals summed over hours)")
     # print out the highest dual cases

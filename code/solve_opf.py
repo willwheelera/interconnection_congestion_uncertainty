@@ -30,7 +30,7 @@ from egret.models.dcopf import create_btheta_dcopf_model, solve_dcopf
 from egret.common.solver_interface import _solve_model
 
 from utils.availability import avail_to_id, id_to_avail, remove_unavailable_generators
-from utils.modify_network import scale_all_loads
+from utils.modify_network import scale_load
 import logging
 logging.getLogger('egret').setLevel(logging.WARNING)
 logging.getLogger('pyomo.core').addFilter(lambda r: getattr(r, 'id', None) != 'W1002')
@@ -100,7 +100,12 @@ def create_case(md_ref: ModelData, availability) -> ModelData:
     return md
 
 
-def result_path(case_path: Path, availability: list[int] | None, scale=None) -> Path:
+def result_path(
+    case_path: Path, 
+    availability: list[int] | None, 
+    scale=None,
+    load_name=None,
+) -> Path:
     case_id = case_path.stem
     case_dir = case_id.replace(".json", "")
     out_dir = RESULTS_DIR / case_dir
@@ -108,8 +113,10 @@ def result_path(case_path: Path, availability: list[int] | None, scale=None) -> 
     label = ""
     if availability is not None:
         label += f"_avail{avail_to_id(availability)}"
+    if load_name is not None:
+        label += f"_{load_name}"
     if scale is not None:
-        label += f"_load{int(scale*100)}"
+        label += f"_scale{int(scale*100)}"
     return out_dir / f"opf_{case_id}{label}.json.gz"
 
 
@@ -200,9 +207,9 @@ def run_nminus1_cases(case_path, nremove=1, solver="gurobi"):
     print(f"viable {viable_configs} / {total_configs}")
 
 
-def run_load(md, av, scale, case_path, solver="gurobi"):
+def run_load(md, av, load, scale, case_path, solver="gurobi"):
     md = copy.deepcopy(md)
-    scale_all_loads(md, scale)
+    scale_load(md, scale, load)
     try:
         md_sol, m = solve_opf(md, solver=solver)
     except Exception as e:
@@ -210,7 +217,7 @@ def run_load(md, av, scale, case_path, solver="gurobi"):
         print(e)
         return None
     store_branch_duals(m, md_sol)
-    out = result_path(case_path, av, scale)
+    out = result_path(case_path, av, scale, load)
     md_sol.write(str(out))
     return out
 
@@ -223,12 +230,11 @@ def run_load_scan(case_path, solver="gurobi"):
     av = id_to_avail(540, ngen)
     remove_unavailable_generators(md, av)
 
-    run_load(md, av, 0.5, case_path, solver=solver)
-    quit()
     with concurrent.futures.ProcessPoolExecutor() as ex:
         out = []
-        for scale in [.5, .6, .7, .8, .9, 1.]:
-            out.append(ex.submit(run_load, md, av, scale, case_path, solver=solver))
+        for scale in np.arange(20, 100, 1)/100:
+            for load in md.data["elements"]["load"].keys():
+                out.append(ex.submit(run_load, md, av, load, scale, case_path, solver=solver))
         for o in out:
             o.result()
     

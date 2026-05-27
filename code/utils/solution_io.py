@@ -1,6 +1,7 @@
 """Helpers for reading dispatch, metadata, and duals from solved ModelData / JSON."""
 
 import json
+import gzip
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -86,15 +87,15 @@ def load_sensitivity_result(id: int, path: Path) -> dict:
     return json.loads(matches[0].read_text())
 
 
-def load_dual_cache(result_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_dual_cache(cache: Path, search="*") -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load cached dual sums from Parquet, rebuilding if missing or stale."""
-    cache = result_path / "dual_cache.parquet"
+    #cache = result_path / "dual_cache.parquet"
     stale = not cache.exists() or any(
         p.stat().st_mtime > cache.stat().st_mtime
-        for p in result_path.glob("*.json.gz")
+        for p in cache.parent.glob(f"{search}.json.gz")
     )
     if stale:
-        build_dual_cache(result_path)
+        build_dual_cache(cache, search)
     df = pd.read_parquet(cache)
     lmp_all = df["lmp"]
     mu_all = df["mu"]
@@ -103,7 +104,7 @@ def load_dual_cache(result_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return lmp_all, mu_all
 
 
-def load_all_duals(result_path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_all_duals(cache_path, search="*") -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load LMP and mu from every solution JSON, summed over hours.
 
     Each file is read once; generation total, load total, LMP, and μ are
@@ -119,9 +120,19 @@ def load_all_duals(result_path) -> tuple[pd.DataFrame, pd.DataFrame]:
     lmp_rows = {}
     mu_rows = {}
     skipped = 0
-    for path in sorted(result_path.glob("*.json.gz")):
+    for path in sorted(cache_path.parent.glob(f"{search}.json.gz")):
         stem = path.stem.replace(".json", "")
-        if "avail" in stem:
+        load_id = None
+        if "_load" in stem:
+            s = stem.replace("load_", "load")
+            for word in s.split("_"):
+                if "avail" in word:
+                    avail_id = int(word.replace("avail", ""))
+                if "load" in word:
+                    load_id = int(word.replace("load", ""))
+                if "scale" in word:
+                    scale_id = int(word.replace("scale", ""))
+        elif "avail" in stem:
             avail_id = int(stem.split("avail")[1])
         else:
             avail_id = stem
@@ -162,21 +173,25 @@ def load_all_duals(result_path) -> tuple[pd.DataFrame, pd.DataFrame]:
             lower = np.array(_hourly(mu_l, n_hours))
             mu_sum[name] = float((upper + lower).sum()) # sum abs instead of positives/negatives
 
-        lmp_rows[avail_id] = pd.Series(lmp_sum)
-        mu_rows[avail_id] = pd.Series(mu_sum)
+        row_id = avail_id # default calculation, scan through availabilities.
+        if "_load" in stem: # scaling load experiment
+            row_id = (avail_id, load_id, scale_id)
+        lmp_rows[row_id] = pd.Series(lmp_sum)
+        mu_rows[row_id] = pd.Series(mu_sum)
     if skipped:
         print(f"Skipped {skipped} scenarios with load/generation mismatch")
     lmp_all = pd.DataFrame(lmp_rows).T
-    lmp_all.index.name = "avail_id"
     mu_all = pd.DataFrame(mu_rows).T
-    mu_all.index.name = "avail_id"
+    name = "load_scale" if load_id else "avail_id"
+    lmp_all.index.name = name
+    mu_all.index.name = name
     return lmp_all, mu_all
 
 
-def build_dual_cache(result_path: Path) -> Path:
+def build_dual_cache(cache_path: Path, search) -> Path:
     """Aggregate per-scenario dual sums into a single Parquet file.
 
-    Reads every uc_*.json.gz in *result_path*, computes hourly sums of LMP
+    Reads every uc_*.json.gz in *cache_path.parent*, computes hourly sums of LMP
     and mu, and writes two column groups into one Parquet file:
       - lmp/<bus_name>  for each bus
       - mu/<branch_name> for each branch
@@ -185,14 +200,13 @@ def build_dual_cache(result_path: Path) -> Path:
 
     Returns the path to the written Parquet file.
     """
-    lmp_all, mu_all = load_all_duals(result_path)
+    lmp_all, mu_all = load_all_duals(cache_path, search)
     combined = pd.concat(
         {"lmp": lmp_all, "mu": mu_all}, axis=1,
     )
-    out = result_path / "dual_cache.parquet"
-    combined.to_parquet(out)
-    print(f"Wrote {out} ({len(combined)} scenarios)")
-    return out
+    combined.to_parquet(cache_path)
+    print(f"Wrote {cache_path} ({len(combined)} scenarios)")
+    return cache_path
 
 def _hourly(field, n_hours):
     """Expand a scalar-or-time-series field into a length-n_hours list."""

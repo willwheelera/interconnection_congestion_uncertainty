@@ -6,3 +6,6 @@ def scale_all_loads(md, a):
         md.data["elements"]["load"][name]["p_load"] *= a
         md.data["elements"]["load"][name]["q_load"] *= a
     
+def scale_load(md, a, name):
+    md.data["elements"]["load"][name]["p_load"] *= a
+    md.data["elements"]["load"][name]["q_load"] *= a
