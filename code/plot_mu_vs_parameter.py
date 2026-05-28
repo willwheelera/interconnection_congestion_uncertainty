@@ -35,16 +35,35 @@ def plot_seaborn(mu_all, path, val="mu", var="line"):
     plt.savefig(path, bbox_inches="tight")
 
 
+def plot_seaborn_combined(df_dict, path, var):
+    """One figure with a row per variable in df_dict and a column per load; hue = `var`."""
+    print(f"saving to {path}")
+    frames = []
+    for key, mu_all in df_dict.items():
+        d = mu_all.reset_index(names=["load", "scale"])
+        d = d.melt(id_vars=["load", "scale"], value_vars=mu_all.columns, var_name=var, value_name="value")
+        d["variable"] = key
+        frames.append(d)
+    df = pd.concat(frames, ignore_index=True)
+    g = sns.FacetGrid(data=df, row="variable", col="load", hue=var,
+                     height=3.0, sharey="row", row_order=list(df_dict))
+    g.map(plt.plot, "scale", "value")
+    g.add_legend(title=var)
+    plt.savefig(path, bbox_inches="tight")
+
+
 def main(result_path):
     df = load_dual_cache(result_path, scan="load")
     df = df.loc[540]
     loads = [9, 13, 14]
     df = df.loc[loads]
 
-    bus_line = dict(mu="line", lmp="bus", flow="line", injection="bus", va="bus", nu="line")
-    for key in ["mu", "lmp", "flow", "injection", "va", "nu"]:
-        path = result_path.parent / f"{key}_vs_load.pdf"
-        plot_seaborn(df[key], path, key, bus_line[key])
+    bus_vars = ["lmp", "injection", "va"]
+    line_vars = ["mu", "flow", "nu"]
+    plot_seaborn_combined({k: df[k] for k in bus_vars},
+                          result_path.parent / "bus_vars_vs_load.pdf", "bus")
+    plot_seaborn_combined({k: df[k] for k in line_vars},
+                          result_path.parent / "line_vars_vs_load.pdf", "line")
 
     plt.show()
 
