@@ -46,8 +46,12 @@ def plot_seaborn_combined(df_dict, path, var):
         frames.append(d)
     df = pd.concat(frames, ignore_index=True)
     g = sns.FacetGrid(data=df, row="variable", col="load", hue=var,
-                     height=3.0, sharey="row", row_order=list(df_dict))
+                     height=3.0, sharey="row", row_order=list(df_dict),
+                     margin_titles=True)
     g.map(plt.plot, "scale", "value")
+    g.set_titles(row_template="", col_template="load = {col_name}")
+    for ax, name in zip(g.axes[:, 0], list(df_dict)):
+        ax.set_ylabel(name)
     g.add_legend(title=var)
     plt.savefig(path, bbox_inches="tight")
 
