@@ -27,24 +27,24 @@ def plot_seaborn(mu_all, path, val="mu", var="line"):
     print(f"saving to {path}")
     df = mu_all.reset_index(names=["load", "scale"])
     df = df.melt(id_vars=["load", "scale"], value_vars=mu_all.columns, var_name=var, value_name=val)
-    g = sns.FacetGrid(data=df, col="load", hue=var, col_wrap=4, height=2.5)
+    g = sns.FacetGrid(data=df, col="load", hue=var, col_wrap=4, height=4.5)
     g.map(plt.plot, "scale", val)
-    congested = mu_all.sum(axis=0) > 1
+    congested = mu_all.sum(axis=0).abs() > 1
     select = [[g._legend_data[k], k] for k in congested.index[congested]]
     g.axes[-1].legend(*list(zip(*select)), title=var, ncol=2, loc="center left", bbox_to_anchor=(1.2, 0.5))
     plt.savefig(path, bbox_inches="tight")
 
 
 def main(result_path):
-    lmp_all, mu_all = load_dual_cache(result_path, "*_load*")
-    lmp_all = lmp_all.loc[540] # remove avail_id index level
-    mu_all = mu_all.loc[540] # remove avail_id index level
+    df = load_dual_cache(result_path, scan="load")
+    df = df.loc[540]
     loads = [9, 13, 14]
-    mu_all = mu_all.loc[loads]
-    lmp_all = lmp_all.loc[loads]
+    df = df.loc[loads]
 
-    plot_seaborn(mu_all, result_path.parent / "mu_vs_load.pdf")
-    plot_seaborn(lmp_all, result_path.parent / "lmp_vs_load.pdf", "lmp", "bus")
+    bus_line = dict(mu="line", lmp="bus", flow="line", injection="bus", va="bus", nu="line")
+    for key in ["mu", "lmp", "flow", "injection", "va", "nu"]:
+        path = result_path.parent / f"{key}_vs_load.pdf"
+        plot_seaborn(df[key], path, key, bus_line[key])
 
     plt.show()
 
