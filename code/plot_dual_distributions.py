@@ -165,17 +165,21 @@ def _annotate_marginal_counts(ax: plt.Axes, orient: str) -> None:
             ax.text(x, y, f"{int(count)}", ha="left", va="center", fontsize=6)
 
 
+def print_large(df):
+    df = df.copy()
+    df["total"] = df.sum(axis=1).abs()
+    df = df.sort_values("total", ascending=False)
+    print(df[:10].round(0).astype(int))
+
+
 def main(result_path):
-    lmp_all, mu_all = load_dual_cache(result_path / "dual_cache.parquet")
+    df = load_dual_cache(result_path / "dual_cache.parquet")
+    lmp_all, mu_all = df["lmp"], df["mu"]
     n_scenarios = len(lmp_all)
     print(f"Loaded {n_scenarios} scenarios (duals summed over hours)")
     # print out the highest dual cases
-    mu_all["total"] = mu_all.sum(axis=1).abs()
-    lmp_all["total"] = lmp_all.sum(axis=1).abs()
-    tmp_mu = mu_all.sort_values("total", ascending=False)
-    tmp_lmp = lmp_all.sort_values("total", ascending=False)
-    print(tmp_lmp[:5].round(0).astype(int))
-    print(tmp_mu[:5].round(0).astype(int))
+    print_large(mu_all)
+    print_large(lmp_all)
 
     fig, axes = plt.subplots(3, 1, figsize=(8, 9))
 
