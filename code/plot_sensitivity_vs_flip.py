@@ -200,42 +200,52 @@ def collect_points_all(mu: pd.DataFrame, sens: pd.DataFrame,
     })
 
 
-def plot_points_all(pts: pd.DataFrame, out_path: Path) -> None:
+def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
     """Scatter of delta_mu vs (flip-signed) sensitivity over every cached config."""
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+
+    zero_dmu = pts["dmu"].abs().values <= eps # indices
+    ax = axs[0]
     branches = sorted(pts["branch"].unique(), key=int)
     cmap = plt.get_cmap("tab20", len(branches))
     for i, br in enumerate(branches):
         m = pts["branch"] == br
-        ax.scatter(pts["S_signed"][m], pts["dmu"][m],
-                   s=4, alpha=0.25, color=cmap(i), label=f"{br}",
+        ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
+                   s=5, alpha=0.15, color=cmap(i), label=f"{br}",
                    rasterized=True, linewidths=0)
     ax.axhline(0, color="k", lw=0.5)
     ax.axvline(0, color="k", lw=0.5)
     ax.set_xlabel(r"flip_sign $\cdot\; \partial \mu_l / \partial \mathrm{load}_{b(k)}$  at base $x$")
     ax.set_ylabel(r"$\mu_l(y_k) - \mu_l(x)$")
     ax.set_title(
-        f"all configurations, one-flip neighbors, "
-        f"{len(pts):,} (config, gen, branch) points"
+        f"{sum(~zero_dmu):,} (config, gen, branch) points"
     )
     leg = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
                     fontsize=8, ncol=1, frameon=False, title="branch",
                     markerscale=4)
     for lh in leg.legend_handles:
         lh.set_alpha(1.0)
+
+    ax = axs[1]
+    ax.hist(pts["S_signed"], log=True, label="all")
+    ax.hist(pts["S_signed"][zero_dmu], log=True, label=r"$\Delta\mu=0$")
+    ax.set_xlabel("sensitivity")
+    ax.set_title(r"$\Delta \mu = 0$, " + f"{sum(zero_dmu):.2g} pts")
+    ax.legend()
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)
     print(f"Wrote {out_path}")
     report_metrics(pts["S_signed"].values, pts["dmu"].values, "all configs")
 
 
-def main() -> None:
+def main():
     mu = pd.read_parquet(RESULTS_DIR / "dual_cache.parquet")["mu"]
     sens = pd.read_parquet(RESULTS_DIR / "sensitivity_cache.parquet")
     gen_buses = load_gen_bus_map(CASE_PATH)
-    pts = collect_points(BASE_AVAIL_ID, mu, sens, gen_buses)
-    out_path = RESULTS_DIR / f"sensitivity_vs_flip_avail{BASE_AVAIL_ID}.pdf"
-    plot_points(pts, BASE_AVAIL_ID, out_path)
+    #pts = collect_points(BASE_AVAIL_ID, mu, sens, gen_buses)
+    #out_path = RESULTS_DIR / f"sensitivity_vs_flip_avail{BASE_AVAIL_ID}.pdf"
+    #plot_points(pts, BASE_AVAIL_ID, out_path)
     pts_all = collect_points_all(mu, sens, gen_buses)
     plot_points_all(pts_all, RESULTS_DIR / "sensitivity_vs_flip_all.pdf")
     plt.show()
