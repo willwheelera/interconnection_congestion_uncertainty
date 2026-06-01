@@ -33,6 +33,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 from utils.availability import id_to_avail, avail_to_id
 
@@ -151,7 +152,7 @@ def plot_points(pts: pd.DataFrame, base_id: int, out_path: Path) -> None:
     report_metrics(x_signed.values, pts["dmu"].values, f"avail_id={base_id}")
 
 
-def collect_points_all(mu: pd.DataFrame, sens: pd.DataFrame,
+def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
                        gen_buses: list[str]) -> pd.DataFrame:
     """Same as collect_points, but stacked across every cached config.
 
@@ -161,27 +162,36 @@ def collect_points_all(mu: pd.DataFrame, sens: pd.DataFrame,
     neighbor mu rows, and picks the sensitivity column for the bus that
     hosts the flipped generator.  Configs whose neighbor isn't in the
     cache (e.g. the all-off id 0) are dropped.
+
+    `p_gen` is the per-config nodal generation (rows = avail_id, columns =
+    bus name); the output's "p_gen" column is the base configuration's
+    generation at the bus b(k) that hosts the flipped generator k.
     """
-    branches = list(mu.columns)
+    branches = list(df["mu"].columns)
     bus_levels = sens.columns.get_level_values("bus").unique().tolist()
     n_br, n_bus = len(branches), len(bus_levels)
     bus_idx = {b: i for i, b in enumerate(bus_levels)}
     gen_bus_idx = np.array([bus_idx[b] for b in gen_buses])
 
-    ids = mu.index.values.astype(np.int64)
+    ids = df.index.values.astype(np.int64)
     id_to_row = {int(i): r for r, i in enumerate(ids)}
     n = len(ids)
 
-    mu_arr = mu.values                                              # (n, n_br)
+    mu_arr = df["mu"].values                                              # (n, n_br)
     sens_arr = sens.values.reshape(n, n_br, n_bus)                  # (n, n_br, n_bus)
     x_bits = np.stack([id_to_avail(int(i), NGEN) for i in ids])     # (n, NGEN)
+
+    # base-config generation at b(k), the bus hosting each flipped generator
+    p_gen_bk = df["p_gen"].loc[:, gen_buses].values                 # (n, NGEN)
 
     # avail position k is the (NGEN-1-k)-th bit of the integer encoding
     bit_mask = (1 << (NGEN - 1 - np.arange(NGEN))).astype(np.int64)
     neighbor_ids = ids[:, None] ^ bit_mask[None, :]                 # (n, NGEN)
 
-    valid = np.vectorize(lambda nid: int(nid) in id_to_row)(neighbor_ids)
-    neighbor_rows = np.vectorize(lambda nid: id_to_row.get(int(nid), 0))(neighbor_ids)
+    @np.vectorize(otypes=[bool, int])
+    def get_valid_neighbors(nid: int):
+        return (nid in id_to_row, id_to_row.get(nid, 0))
+    valid, neighbor_rows = get_valid_neighbors(neighbor_ids)
     mu_y = mu_arr[neighbor_rows]                                    # (n, NGEN, n_br)
     dmu = mu_y - mu_arr[:, None, :]                                 # (n, NGEN, n_br)
 
@@ -190,6 +200,7 @@ def collect_points_all(mu: pd.DataFrame, sens: pd.DataFrame,
     S_per_gen = np.transpose(S_per_gen, (0, 2, 1))                  # (n, NGEN, n_br)
     flip_sign = (2 * x_bits - 1)[:, :, None]                        # (n, NGEN, 1)
     S_signed = flip_sign * S_per_gen                                # (n, NGEN, n_br)
+    p_gen_b = np.broadcast_to(p_gen_bk[:, :, None], dmu.shape)      # (n, NGEN, n_br)
 
     mask = np.broadcast_to(valid[:, :, None], dmu.shape)
     branch_arr = np.broadcast_to(np.array(branches), dmu.shape)
@@ -197,22 +208,25 @@ def collect_points_all(mu: pd.DataFrame, sens: pd.DataFrame,
         "branch": branch_arr[mask],
         "S_signed": S_signed[mask],
         "dmu": dmu[mask],
+        "p_gen": p_gen_b[mask],
     })
 
 
 def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
     """Scatter of delta_mu vs (flip-signed) sensitivity over every cached config."""
-    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
 
     zero_dmu = pts["dmu"].abs().values <= eps # indices
     ax = axs[0]
     branches = sorted(pts["branch"].unique(), key=int)
     cmap = plt.get_cmap("tab20", len(branches))
-    for i, br in enumerate(branches):
-        m = pts["branch"] == br
-        ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
-                   s=5, alpha=0.15, color=cmap(i), label=f"{br}",
-                   rasterized=True, linewidths=0)
+
+    sns.scatterplot(data=pts[m&~zero_dmu], x="S_signed", y="dmu", hue="p_gen", size=5, ax=ax)
+    #for i, br in enumerate(branches):
+    #    m = pts["branch"] == br
+    #    ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
+    #               s=5, alpha=0.15, color=cmap(i), label=f"{br}",
+    #               rasterized=True, linewidths=0)
     ax.axhline(0, color="k", lw=0.5)
     ax.axvline(0, color="k", lw=0.5)
     ax.set_xlabel(r"flip_sign $\cdot\; \partial \mu_l / \partial \mathrm{load}_{b(k)}$  at base $x$")
@@ -240,13 +254,13 @@ def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
 
 
 def main():
-    mu = pd.read_parquet(RESULTS_DIR / "dual_cache.parquet")["mu"]
+    df = pd.read_parquet(RESULTS_DIR / "dual_cache.parquet")
     sens = pd.read_parquet(RESULTS_DIR / "sensitivity_cache.parquet")
     gen_buses = load_gen_bus_map(CASE_PATH)
     #pts = collect_points(BASE_AVAIL_ID, mu, sens, gen_buses)
     #out_path = RESULTS_DIR / f"sensitivity_vs_flip_avail{BASE_AVAIL_ID}.pdf"
     #plot_points(pts, BASE_AVAIL_ID, out_path)
-    pts_all = collect_points_all(mu, sens, gen_buses)
+    pts_all = collect_points_all(df["mu"], sens, df["p_gen"], gen_buses)
     plot_points_all(pts_all, RESULTS_DIR / "sensitivity_vs_flip_all.pdf")
     plt.show()
 
