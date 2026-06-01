@@ -1,12 +1,18 @@
-"""Helpers for reading dispatch, metadata, and duals from solved ModelData / JSON."""
+"""Helpers for reading dispatch, metadata, and duals from solved single-period
+OPF ModelData / JSON. All scalar fields are plain floats — no hourly expansion.
+
+For multi-period unit-commitment results (with ``time_keys`` and ``{"values":
+[...]}`` time-series fields), use ``multiperiod_solution_io`` instead.
+"""
 
 import json
 import gzip
 import pandas as pd
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
-
-import pandas as pd
+import time
 
 FUEL_LABELS = {
     "C": "Coal",
@@ -28,34 +34,30 @@ def get_lmps(md_sol) -> dict[str, float]:
     }
 
 
-def load_pg(raw: dict) -> pd.DataFrame:
-    """Return (n_hours x n_generators) DataFrame of pg dispatch in MW."""
-    gens = raw["elements"]["generator"]
-    n_hours = len(raw["system"]["time_keys"])
-    data = {}
-    for name, g in gens.items():
-        pg = g.get("pg", 0.0)
-        data[name] = pg["values"] if isinstance(pg, dict) else [float(pg)] * n_hours
-    return pd.DataFrame(data, index=range(n_hours))
+def load_pg(raw: dict) -> pd.Series:
+    """Return a Series of pg dispatch in MW, indexed by generator name."""
+    return pd.Series({
+        name: float(g.get("pg", 0.0))
+        for name, g in raw["elements"]["generator"].items()
+    })
 
 
 def load_generator_metadata(raw: dict) -> pd.DataFrame:
     """Return DataFrame with 'fuel' and 'type' columns indexed by generator name."""
-    gens = raw["elements"]["generator"]
     return pd.DataFrame(
         {name: {"fuel": g.get("fuel", "?"), "type": g.get("generator_type", "?")}
-         for name, g in gens.items()}
+         for name, g in raw["elements"]["generator"].items()}
     ).T
 
 
-def pg_by_fuel(pg_df: pd.DataFrame, meta: pd.DataFrame) -> dict[str, pd.Series]:
-    """Aggregate pg by fuel type label, returning {label: hourly_total_MW}."""
+def pg_by_fuel(pg: pd.Series, meta: pd.DataFrame) -> dict[str, float]:
+    """Aggregate pg by fuel type label, returning {label: total_MW}."""
     result = {}
     for fuel_code, label in FUEL_LABELS.items():
         gens = meta.index[meta["fuel"] == fuel_code].tolist()
-        cols = [g for g in gens if g in pg_df.columns]
+        cols = [g for g in gens if g in pg.index]
         if cols:
-            result[label] = pg_df[cols].sum(axis=1)
+            result[label] = float(pg[cols].sum())
     return result
 
 
@@ -87,8 +89,8 @@ def load_sensitivity_result(id: int, path: Path) -> dict:
     return json.loads(matches[0].read_text())
 
 
-def load_dual_cache(cache: Path, scan="availability") -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load cached dual sums from Parquet, rebuilding if missing or stale.
+def load_dual_cache(cache: Path, scan="availability") -> pd.DataFrame:
+    """Load cached dual values from Parquet, rebuilding if missing or stale.
 
     *scan* selects which experiment's files feed the cache: "availability"
     (vary availability, fixed parameters) or "load" (scan load, fixed
@@ -102,122 +104,117 @@ def load_dual_cache(cache: Path, scan="availability") -> tuple[pd.DataFrame, pd.
         build_dual_cache(cache, scan)
     df = pd.read_parquet(cache)
     df = df.sort_index()
-    
+
     name = "load_scale" if scan == "load" else "avail_id"
     df.index.name = name
     return df
 
 
-def load_all_duals(cache_path, scan="availability") -> dict[str, pd.DataFrame]:
-    """Load duals and primal variables from every solution JSON, summed over hours.
+def load_all_duals(cache_path, scan="availability", max_workers=None) -> pd.DataFrame:
+    """Load duals and primal variables from every single-period OPF solution.
 
     *scan* selects which experiment's files to read (see `_solution_files`):
     "availability" indexes rows by avail_id; "load" indexes them by the
     (avail_id, load_id, scale_id) tuple.
 
-    Each file is read once; generation total, load total, and all dual and
-    primal quantities are extracted from the same parsed dict. Works for both
-    multi-period UC results (fields are dicts of hourly values) and
-    single-period OPF results (fields are scalars) — in the OPF case "sum over
-    hours" is just the single value.
+    Files are read in parallel via a ThreadPoolExecutor (gzip + JSON parsing
+    are the bottleneck and gzip releases the GIL); *max_workers* is forwarded
+    to the pool (default: ``min(32, os.cpu_count() + 4)``).
 
-    Returns a dict of DataFrames, one per quantity, each indexed by scenario:
+    Returns a DataFrame with a two-level column index, one block per quantity:
         lmp       — columns = bus names (dual λ of nodal power balance)
-        mu        — columns = branch names (|mu_upper| + |mu_lower| on flow limit)
+        mu        — columns = branch names (mu_upper + mu_lower on flow limit)
         nu        — columns = branch names (dual of pf = B(θ_f − θ_t))
+        p_gen     — columns = bus names (nodal power gen)
         injection — columns = bus names (nodal power injection, gen minus load)
         flow      — columns = branch names (line power flow pf)
         va        — columns = bus names (nodal phase angle)
     """
-    blocks = {k: {} for k in ("lmp", "mu", "nu", "injection", "flow", "va")}
-    skipped = 0
-    for path in _solution_files(cache_path.parent, scan):
-        stem = path.stem.replace(".json", "")
-        load_id = None
-        if "_load" in stem:
-            s = stem.replace("load_", "load")
-            for word in s.split("_"):
-                if "avail" in word:
-                    avail_id = int(word.replace("avail", ""))
-                if "load" in word:
-                    load_id = int(word.replace("load", ""))
-                if "scale" in word:
-                    scale_id = int(word.replace("scale", ""))
-        elif "avail" in stem:
-            avail_id = int(stem.split("avail")[1])
-        else:
-            avail_id = stem
-        try:
-            with gzip.open(path, "rt") as f:
-                raw = json.load(f)
-        except:
-            print(path)
-            raise
-        time_keys = raw["system"].get("time_keys")
-        n_hours = len(time_keys) if time_keys else 1
-        if isinstance(avail_id, int) and time_keys and sum(map(int, np.binary_repr(avail_id))) < 3:
-            continue
+    blocks = {k: {} for k in ("lmp", "mu", "nu", "p_gen", "injection", "flow", "va")}
+    paths = _solution_files(cache_path.parent, scan)
+    t0 = time.perf_counter()
+    blocks = []
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        # Workers write a (unique) row_id slot into the shared `blocks` dict
+        # CPython dict insertion is atomic, and no key collides -> no GIL
+        # `list(...)` forces exceptions from workers to surface here
+        futures = [ex.submit(_load_one_solution, path) for path in paths]
+        for i, ft in enumerate(as_completed(futures)):
+            blocks.append(ft.result())
+            if (i+1)%500 == 0:
+                print(f"{i+1}/{len(paths)}  {time.perf_counter()-t0:.2f}", flush=True)
+        #list(ex.map(f, paths))
 
-        total_gen = np.zeros(n_hours)
-        for g in raw["elements"]["generator"].values():
-            total_gen += np.array(_hourly(g.get("pg", 0.0), n_hours))
-
-        total_load = np.zeros(n_hours)
-        for load in raw["elements"]["load"].values():
-            total_load += np.array(_hourly(load["p_load"], n_hours))
-
-        #if not np.allclose(total_gen, total_load, rtol=1e-6, atol=1e-6):
-        #    skipped += 1
-        #    print(f"Skipping {avail_id}")
-        #    continue
-
-        lmp_sum = {}
-        for name, b in raw["elements"]["bus"].items():
-            lmp = b.get("lmp")
-            if lmp is None:
-                continue
-            lmp_sum[name] = float(np.sum(_hourly(lmp, n_hours)))
-
-        mu_sum = {}
-        nu_sum = {}
-        for name, br in raw["elements"]["branch"].items():
-            mu_u = br.get("mu_upper")
-            mu_l = br.get("mu_lower")
-            if mu_u is None or mu_l is None:
-                continue
-            upper = np.array(_hourly(mu_u, n_hours))
-            lower = np.array(_hourly(mu_l, n_hours))
-            mu_sum[name] = float((upper + lower).sum()) # sum abs instead of positives/negatives
-            nu = br.get("nu")
-            if nu is not None:
-                nu_sum[name] = float(np.sum(_hourly(nu, n_hours)))
-
-        row_id = avail_id # default calculation, scan through availabilities.
-        if "_load" in stem: # scaling load experiment
-            row_id = (avail_id, load_id, scale_id)
-        blocks["lmp"][row_id] = pd.Series(lmp_sum)
-        blocks["mu"][row_id] = pd.Series(mu_sum)
-        blocks["nu"][row_id] = pd.Series(nu_sum)
-        blocks["injection"][row_id] = pd.Series(_nodal_injection(raw, n_hours))
-        blocks["flow"][row_id] = pd.Series(_line_flow(raw, n_hours))
-        blocks["va"][row_id] = pd.Series(_phase_angle(raw, n_hours))
-    if skipped:
-        print(f"Skipped {skipped} scenarios with load/generation mismatch")
     name = "load_scale" if scan == "load" else "avail_id"
-    result = {k: pd.DataFrame(rows).T for k, rows in blocks.items()}
-    for df in result.values():
-        df.index.name = name
-    return result
+    #result = {k: pd.DataFrame(rows).T for k, rows in blocks.items()}
+    #df = pd.concat(result, axis=1)
+    df = pd.DataFrame(blocks)
+    df.set_index("row_id", inplace=True)
+    df.index.name = name
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    return df.sort_index().sort_index(axis=1, level=0)
+
+
+def _load_one_solution(path: Path) -> None:
+    """Read one gzipped solution file and write its row into *blocks* in-place.
+
+    Each worker writes to a unique ``blocks[<quantity>][row_id]`` slot — 
+    so concurrent calls are safe under the GIL without explicit locking.
+    """
+    row_id = _row_id_from_stem(path.stem.replace(".json", ""))
+    with gzip.open(path, "rt") as f:
+        raw = json.load(f)
+
+    block = dict(row_id=row_id)
+           
+    for bus_name, bus in raw["elements"]["bus"].items():
+        if "lmp" in bus.keys():
+            block[("lmp", bus_name)] = float(bus["lmp"])
+        if "va" in bus.keys():
+            block[("va", bus_name)] = float(bus["va"])
+
+    for br_name, br in raw["elements"]["branch"].items():
+        mu_u = br.get("mu_upper")
+        mu_l = br.get("mu_lower")
+        if not (mu_u is None or mu_l is None):
+            block[("mu", br_name)] = float(mu_u) + float(mu_l)
+        if "nu" in br:
+            block[("nu", br_name)] = float(br["nu"])
+        if "pf" in br:
+            block[("flow", br_name)] = float(br["pf"])
+
+    block.update(_nodal_gen(raw))
+    block.update(_nodal_load(raw))
+    return block
+
+
+def _row_id_from_stem(stem: str):
+    """Parse the scenario id (or (avail, load, scale) tuple) from a file stem."""
+    if "_load" in stem:
+        s = stem.replace("load_", "load")
+        avail_id = load_id = scale_id = None
+        for word in s.split("_"):
+            if "avail" in word:
+                avail_id = int(word.replace("avail", ""))
+            if "load" in word:
+                load_id = int(word.replace("load", ""))
+            if "scale" in word:
+                scale_id = int(word.replace("scale", ""))
+        return (avail_id, load_id, scale_id)
+    if "avail" in stem:
+        return int(stem.split("avail")[1])
+    return stem
 
 
 def build_dual_cache(cache_path: Path, scan="availability") -> Path:
-    """Aggregate per-scenario dual and primal sums into a single Parquet file.
+    """Aggregate per-scenario duals and primal variables into a single Parquet file.
 
     Reads the *scan* experiment's files in *cache_path.parent* (see
-    `_solution_files`), computes hourly sums of the duals and primal variables,
-    and writes one column group per quantity into a single Parquet file:
+    `_solution_files`), extracts the duals and primal variables from each
+    single-period OPF solution, and writes one column group per quantity into a
+    single Parquet file:
       - lmp/<bus_name>        nodal LMP (dual λ of power balance)
-      - mu/<branch_name>      flow-limit dual (|mu_upper| + |mu_lower|)
+      - mu/<branch_name>      flow-limit dual (mu_upper + mu_lower)
       - nu/<branch_name>      dual of the pf = B(θ_f − θ_t) equality
       - injection/<bus_name>  nodal power injection (generation minus load)
       - flow/<branch_name>    line power flow (pf)
@@ -227,11 +224,11 @@ def build_dual_cache(cache_path: Path, scan="availability") -> Path:
 
     Returns the path to the written Parquet file.
     """
-    blocks = load_all_duals(cache_path, scan)
-    combined = pd.concat(blocks, axis=1)
-    combined.to_parquet(cache_path)
-    print(f"Wrote {cache_path} ({len(combined)} scenarios)")
+    df = load_all_duals(cache_path, scan)
+    df.to_parquet(cache_path)
+    print(f"Wrote {cache_path} ({len(df)} scenarios)")
     return cache_path
+
 
 def _solution_files(parent: Path, scan: str) -> list[Path]:
     """Return the solution files for the named scan experiment, sorted by name.
@@ -252,36 +249,20 @@ def _solution_files(parent: Path, scan: str) -> list[Path]:
     raise ValueError(f"unknown scan {scan!r}; expected 'availability' or 'load'")
 
 
-def _hourly(field, n_hours):
-    """Expand a scalar-or-time-series field into a length-n_hours list."""
-    return field["values"] if isinstance(field, dict) else [float(field)] * n_hours
-
-
-def _nodal_injection(raw, n_hours) -> dict[str, float]:
-    """Sum over hours of net injection (generation minus load) at each bus."""
-    inj = {name: np.zeros(n_hours) for name in raw["elements"]["bus"]}
+def _nodal_gen(raw) -> dict[str, float]:
+    """Net injection (generation minus load) at each bus."""
+    key = "p_gen"
+    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
     for g in raw["elements"]["generator"].values():
-        inj[g["bus"]] += np.array(_hourly(g.get("pg", 0.0), n_hours))
+        inj[(key, g["bus"])] += float(g.get("pg", 0.0))
+    return inj
+
+
+def _nodal_load(raw) -> dict[str, float]:
+    key = "load"
+    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
     for load in raw["elements"]["load"].values():
-        inj[load["bus"]] -= np.array(_hourly(load["p_load"], n_hours))
-    return {name: float(v.sum()) for name, v in inj.items()}
-
-
-def _line_flow(raw, n_hours) -> dict[str, float]:
-    """Sum over hours of the power flow (pf) on each branch."""
-    return {
-        name: float(np.sum(_hourly(br["pf"], n_hours)))
-        for name, br in raw["elements"]["branch"].items()
-        if "pf" in br
-    }
-
-
-def _phase_angle(raw, n_hours) -> dict[str, float]:
-    """Sum over hours of the phase angle (va) at each bus."""
-    return {
-        name: float(np.sum(_hourly(b["va"], n_hours)))
-        for name, b in raw["elements"]["bus"].items()
-        if "va" in b
-    }
+        inj[(key, load["bus"])] -= float(load["p_load"])
+    return inj
 
 
