@@ -117,27 +117,20 @@ def load_all_duals(cache_path, scan="availability", max_workers=None) -> pd.Data
     "availability" indexes rows by avail_id; "load" indexes them by the
     (avail_id, load_id, scale_id) tuple.
 
-    Files are read in parallel via a ThreadPoolExecutor (gzip + JSON parsing
-    are the bottleneck and gzip releases the GIL); *max_workers* is forwarded
-    to the pool (default: ``min(32, os.cpu_count() + 4)``).
+    Files are read in parallel via a ProcessPoolExecutor
 
     Returns a DataFrame with a two-level column index, one block per quantity:
         lmp       — columns = bus names (dual λ of nodal power balance)
         mu        — columns = branch names (mu_upper + mu_lower on flow limit)
         nu        — columns = branch names (dual of pf = B(θ_f − θ_t))
         p_gen     — columns = bus names (nodal power gen)
-        injection — columns = bus names (nodal power injection, gen minus load)
         flow      — columns = branch names (line power flow pf)
         va        — columns = bus names (nodal phase angle)
     """
-    blocks = {k: {} for k in ("lmp", "mu", "nu", "p_gen", "injection", "flow", "va")}
     paths = _solution_files(cache_path.parent, scan)
     t0 = time.perf_counter()
     blocks = []
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        # Workers write a (unique) row_id slot into the shared `blocks` dict
-        # CPython dict insertion is atomic, and no key collides -> no GIL
-        # `list(...)` forces exceptions from workers to surface here
         futures = [ex.submit(_load_one_solution, path) for path in paths]
         for i, ft in enumerate(as_completed(futures)):
             blocks.append(ft.result())
@@ -146,8 +139,6 @@ def load_all_duals(cache_path, scan="availability", max_workers=None) -> pd.Data
         #list(ex.map(f, paths))
 
     name = "load_scale" if scan == "load" else "avail_id"
-    #result = {k: pd.DataFrame(rows).T for k, rows in blocks.items()}
-    #df = pd.concat(result, axis=1)
     df = pd.DataFrame(blocks)
     df.set_index("row_id", inplace=True)
     df.index.name = name
@@ -156,16 +147,13 @@ def load_all_duals(cache_path, scan="availability", max_workers=None) -> pd.Data
 
 
 def _load_one_solution(path: Path) -> None:
-    """Read one gzipped solution file and write its row into *blocks* in-place.
-
-    Each worker writes to a unique ``blocks[<quantity>][row_id]`` slot — 
-    so concurrent calls are safe under the GIL without explicit locking.
+    """Read one gzipped solution file and return the data as a dict.
     """
     row_id = _row_id_from_stem(path.stem.replace(".json", ""))
     with gzip.open(path, "rt") as f:
         raw = json.load(f)
 
-    block = dict(row_id=row_id)
+    block = {"row_id": row_id}
            
     for bus_name, bus in raw["elements"]["bus"].items():
         if "lmp" in bus.keys():
@@ -186,6 +174,23 @@ def _load_one_solution(path: Path) -> None:
     block.update(_nodal_gen(raw))
     block.update(_nodal_load(raw))
     return block
+
+
+def _nodal_gen(raw) -> dict[str, float]:
+    """generation at each bus."""
+    key = "p_gen"
+    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
+    for g in raw["elements"]["generator"].values():
+        inj[(key, g["bus"])] += float(g.get("pg", 0.0))
+    return inj
+
+
+def _nodal_load(raw) -> dict[str, float]:
+    key = "load"
+    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
+    for load in raw["elements"]["load"].values():
+        inj[(key, load["bus"])] += float(load["p_load"])
+    return inj
 
 
 def _row_id_from_stem(stem: str):
@@ -216,7 +221,7 @@ def build_dual_cache(cache_path: Path, scan="availability") -> Path:
       - lmp/<bus_name>        nodal LMP (dual λ of power balance)
       - mu/<branch_name>      flow-limit dual (mu_upper + mu_lower)
       - nu/<branch_name>      dual of the pf = B(θ_f − θ_t) equality
-      - injection/<bus_name>  nodal power injection (generation minus load)
+      - p_gen/<bus_name>      nodal power generation
       - flow/<branch_name>    line power flow (pf)
       - va/<bus_name>         nodal phase angle
     Rows are indexed by avail_id ("availability" scan) or by the
@@ -247,22 +252,5 @@ def _solution_files(parent: Path, scan: str) -> list[Path]:
         return [p for p in sorted(parent.glob("*.json.gz"))
                 if "_load" not in p.name and "_scale" not in p.name]
     raise ValueError(f"unknown scan {scan!r}; expected 'availability' or 'load'")
-
-
-def _nodal_gen(raw) -> dict[str, float]:
-    """Net injection (generation minus load) at each bus."""
-    key = "p_gen"
-    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
-    for g in raw["elements"]["generator"].values():
-        inj[(key, g["bus"])] += float(g.get("pg", 0.0))
-    return inj
-
-
-def _nodal_load(raw) -> dict[str, float]:
-    key = "load"
-    inj = {(key, name): 0.0 for name in raw["elements"]["bus"]}
-    for load in raw["elements"]["load"].values():
-        inj[(key, load["bus"])] -= float(load["p_load"])
-    return inj
 
 
