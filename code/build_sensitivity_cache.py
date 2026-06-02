@@ -7,10 +7,7 @@ computes the barrier-regularised sensitivities and stores the full
     S_{l,j}(x) = d(mu_l) / d(load_j)  evaluated at the OPF solution of x
 
 where mu_l is the congestion dual of line l (upper plus lower limit
-combined) and load_j is the active-power load at bus j.  A load increase
-at bus j equals an injection decrease, so
-
-    d(mu_l) / d(load_j) = - d(mu_l) / dP_j .
+combined) and load_j is the active-power load at bus j.
 
 The barrier eps parameters (EPS_MU = EPS_X = 1.0 in sensitivity_analysis)
 keep the sensitivity finite at exact transitions.
@@ -55,10 +52,10 @@ def sensitivity_matrix(md: ModelData) -> tuple[np.ndarray, list[str], list[str]]
     )
     bu = mu_sens["branch_upper"]
     bl = mu_sens["branch_lower"]
-    dmudP = bu.values + bl.values
+    dmudL = bu.values + bl.values
     branch_names = list(bu.index)
     bus_names = list(bu.columns)
-    return -dmudP, branch_names, bus_names
+    return dmudL, branch_names, bus_names
 
 
 def _worker(path: Path) -> tuple[int, np.ndarray, list[str], list[str]]:
