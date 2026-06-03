@@ -167,7 +167,12 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
     bus name); the output's "p_gen" column is the base configuration's
     generation at the bus b(k) that hosts the flipped generator k.
     """
-    branches = list(df["mu"].columns)
+    # `sens` is column-ordered by (branch, bus) via _network_state's natkey
+    # sort (1, 2, 3, ..., 14).  `df["mu"]` is column-ordered lexicographically
+    # by pandas (1, 10, 11, ..., 19, 2, 20, ...), so we must reindex the mu
+    # block onto sens's branch order before any positional axis-1 ops, or the
+    # per-branch dmu and S below are taken from different branches.
+    branches = sens.columns.get_level_values("branch").unique().tolist()
     bus_levels = sens.columns.get_level_values("bus").unique().tolist()
     n_br, n_bus = len(branches), len(bus_levels)
     bus_idx = {b: i for i, b in enumerate(bus_levels)}
@@ -177,9 +182,8 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
     id_to_row = {int(i): r for r, i in enumerate(ids)}
     n = len(ids)
 
-    mu_arr = df["mu"].values                                              # (n, n_br)
+    mu_arr = df["mu"].reindex(columns=branches).values                    # (n, n_br)
     sens_arr = sens.values.reshape(n, n_br, n_bus)                  # (n, n_br, n_bus)
-    x_bits = np.stack([id_to_avail(int(i), NGEN) for i in ids])     # (n, NGEN)
 
     # base-config generation at b(k), the bus hosting each flipped generator
     p_gen_bk = df["p_gen"].loc[:, gen_buses].values                 # (n, NGEN)
@@ -198,6 +202,7 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
     # sensitivity column for the bus hosting each flipped generator
     S_per_gen = sens_arr[:, :, gen_bus_idx]                         # (n, n_br, NGEN)
     S_per_gen = np.transpose(S_per_gen, (0, 2, 1))                  # (n, NGEN, n_br)
+    x_bits = np.stack([id_to_avail(int(i), NGEN) for i in ids])     # (n, NGEN)
     flip_sign = (2 * x_bits - 1)[:, :, None]                        # (n, NGEN, 1)
     S_signed = flip_sign * S_per_gen                                # (n, NGEN, n_br)
     p_gen_b = np.broadcast_to(p_gen_bk[:, :, None], dmu.shape)      # (n, NGEN, n_br)
@@ -214,19 +219,19 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
 
 def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
     """Scatter of delta_mu vs (flip-signed) sensitivity over every cached config."""
-    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+    fig, axs = plt.subplots(1, 3, figsize=(10, 4))
 
     zero_dmu = pts["dmu"].abs().values <= eps # indices
     ax = axs[0]
     branches = sorted(pts["branch"].unique(), key=int)
     cmap = plt.get_cmap("tab20", len(branches))
 
-    sns.scatterplot(data=pts[m&~zero_dmu], x="S_signed", y="dmu", hue="p_gen", size=5, ax=ax)
-    #for i, br in enumerate(branches):
-    #    m = pts["branch"] == br
-    #    ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
-    #               s=5, alpha=0.15, color=cmap(i), label=f"{br}",
-    #               rasterized=True, linewidths=0)
+    #sns.scatterplot(data=pts[~zero_dmu], x="S_signed", y="dmu", hue="p_gen", size=5, ax=ax)
+    for i, br in enumerate(branches):
+        m = pts["branch"] == br
+        ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
+                   s=5, alpha=0.05, color=cmap(i), label=f"{br}",
+                   rasterized=True, linewidths=0)
     ax.axhline(0, color="k", lw=0.5)
     ax.axvline(0, color="k", lw=0.5)
     ax.set_xlabel(r"flip_sign $\cdot\; \partial \mu_l / \partial \mathrm{load}_{b(k)}$  at base $x$")
@@ -241,11 +246,24 @@ def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
         lh.set_alpha(1.0)
 
     ax = axs[1]
-    ax.hist(pts["S_signed"], log=True, label="all")
-    ax.hist(pts["S_signed"][zero_dmu], log=True, label=r"$\Delta\mu=0$")
+    n, bins, _ = ax.hist(pts["S_signed"], bins=25, log=True, label="all")
+    ax.hist(pts["S_signed"][zero_dmu], bins=bins, log=True, label=r"$\Delta\mu=0$")
     ax.set_xlabel("sensitivity")
     ax.set_title(r"$\Delta \mu = 0$, " + f"{sum(zero_dmu):.2g} pts")
     ax.legend()
+
+    ax = axs[2]
+    n, bins, _ = ax.hist(pts["dmu"], bins=25, log=True, label="all")
+    n_pos, _ = np.histogram(pts["dmu"][pts["S_signed"]>eps], bins=bins)
+    n_neg, _ = np.histogram(pts["dmu"][pts["S_signed"]<eps], bins=bins)
+    n_zer, _ = np.histogram(pts["dmu"][pts["S_signed"].abs()<eps], bins=bins)
+    mid = 0.5 * (bins[:-1] + bins[1:])
+    ax.plot(mid, n_pos, label="S > 0")
+    ax.plot(mid, n_neg, label="S < 0")
+    ax.plot(mid, n_zer, label="S = 0")
+    ax.set_xlabel(r"$\Delta \mu$")
+    ax.legend()
+
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)
@@ -256,11 +274,12 @@ def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
 def main():
     df = pd.read_parquet(RESULTS_DIR / "dual_cache.parquet")
     sens = pd.read_parquet(RESULTS_DIR / "sensitivity_cache.parquet")
+    assert np.linalg.norm(df.index - sens.index) == 0
     gen_buses = load_gen_bus_map(CASE_PATH)
     #pts = collect_points(BASE_AVAIL_ID, mu, sens, gen_buses)
     #out_path = RESULTS_DIR / f"sensitivity_vs_flip_avail{BASE_AVAIL_ID}.pdf"
     #plot_points(pts, BASE_AVAIL_ID, out_path)
-    pts_all = collect_points_all(df["mu"], sens, df["p_gen"], gen_buses)
+    pts_all = collect_points_all(df, sens, gen_buses)
     plot_points_all(pts_all, RESULTS_DIR / "sensitivity_vs_flip_all.pdf")
     plt.show()
 
