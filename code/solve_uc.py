@@ -102,6 +102,7 @@ def _store_branch_duals(m, md_fixed: ModelData, md_sol: ModelData) -> None:
     buses_data = md_sol.data["elements"]["bus"]
     branches_sol = md_sol.data["elements"]["branch"]
     branches_fixed = md_fixed.data["elements"]["branch"]
+    baseMVA = md_sol.data["system"]["baseMVA"]
     dual = m.model().dual
     time_periods = list(m.TimePeriods)
     n_hours = len(time_periods)
@@ -114,8 +115,12 @@ def _store_branch_duals(m, md_fixed: ModelData, md_sol: ModelData) -> None:
     for dt, mt in enumerate(time_periods):
         block = m.TransmissionBlock[mt]
         lmp_at_t = {b: buses_data[b]["lmp"]["values"][dt] for b in buses_data}
+        # EGRET solves UC in per-unit; the raw Pyomo dual on eq_pf_branch is
+        # $·baseMVA per (MWh per time period).  Divide by both baseMVA and the
+        # period length to land in $/MWh, matching the already-unscaled LMPs.
         nu_dict = {
-            bn: (dual.get(block.eq_pf_branch[bn], 0.0) or 0.0) / time_period_length_hours
+            bn: (dual.get(block.eq_pf_branch[bn], 0.0) or 0.0)
+                / (time_period_length_hours * baseMVA)
             for bn in block.eq_pf_branch
         }
         for bn, br_data in branches_fixed.items():
