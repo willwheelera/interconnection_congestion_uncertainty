@@ -23,7 +23,6 @@ import time
 
 import pyomo.environ as pe
 from pyomo.environ import value
-from math import degrees
 
 from egret.data.model_data import ModelData
 from egret.models.dcopf import create_btheta_dcopf_model, solve_dcopf
