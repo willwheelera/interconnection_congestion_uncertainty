@@ -1,4 +1,10 @@
 """
+DO NOT LOOK AT THIS FILE
+CURRENT WORK IS FOCUSED ON solve_opf.py
+THIS FILE IS NOT USED OR MAINTAINED
+"""
+
+"""
 Solve security-constrained unit commitment (SCUC) with EGRET, then re-solve
 with fixed commitments to obtain LP duals (LMPs, congestion duals).
 
