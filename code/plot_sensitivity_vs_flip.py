@@ -96,9 +96,9 @@ def collect_points(base_id: int, mu: pd.DataFrame, sens: pd.DataFrame,
 
 def report_metrics(S_signed: np.ndarray, dmu: np.ndarray, label: str,
                    eps: float = 1e-6) -> None:
-    """Print zero fractions, Spearman rho, and sign-agreement on non-trivial points.
+    """Print zero fractions, Spearman rho, and sign-agreement on non-zero points.
 
-    A point is "non-trivial" when both |S_signed| > eps and |dmu| > eps; the
+    A point is "non-zero" when both |S_signed| > eps and |dmu| > eps; the
     Spearman rank correlation and sign-agreement rate are reported on that
     subset only.  Zero-sensitivity and zero-dmu fractions are reported
     separately because they describe different failure modes: a zero
@@ -120,9 +120,9 @@ def report_metrics(S_signed: np.ndarray, dmu: np.ndarray, label: str,
     print(f"    zero |S|     = {zero_S:.3f}")
     print(f"    zero |dmu|   = {zero_dmu:.3f}")
     print(f"    both zero    = {both_zero:.3f}")
-    print(f"    non-trivial  = {int(m.sum()):,}/{n:,} ({m.mean():.3f})")
-    print(f"    Spearman rho = {rho:+.3f}   (non-trivial subset)")
-    print(f"    sign-agree   = {agree:.3f}   (non-trivial subset)")
+    print(f"    non-zero  = {int(m.sum()):,}/{n:,} ({m.mean():.3f})")
+    print(f"    Spearman rho = {rho:+.3f}   (non-zero subset)")
+    print(f"    sign-agree   = {agree:.3f}   (non-zero subset)")
 
 
 def plot_points(pts: pd.DataFrame, base_id: int, out_path: Path) -> None:
@@ -187,6 +187,8 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
 
     # base-config generation at b(k), the bus hosting each flipped generator
     p_gen_bk = df["p_gen"].loc[:, gen_buses].values                 # (n, NGEN)
+    mu_pmax_bk = df["mu_pmax"].loc[:, gen_buses].values                 # (n, NGEN)
+    mu_pmin_bk = df["mu_pmin"].loc[:, gen_buses].values                 # (n, NGEN)
 
     # avail position k is the (NGEN-1-k)-th bit of the integer encoding
     bit_mask = (1 << (NGEN - 1 - np.arange(NGEN))).astype(np.int64)
@@ -205,8 +207,11 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
     x_bits = np.stack([id_to_avail(int(i), NGEN) for i in ids])     # (n, NGEN)
     flip_sign = (2 * x_bits - 1)[:, :, None]                        # (n, NGEN, 1)
     S_signed = flip_sign * S_per_gen                                # (n, NGEN, n_br)
-    p_gen_b = np.broadcast_to(p_gen_bk[:, :, None], dmu.shape)      # (n, NGEN, n_br)
 
+    p_gen_b = np.broadcast_to(p_gen_bk[:, :, None], dmu.shape)      # (n, NGEN, n_br)
+    flip_sign_b = np.broadcast_to(flip_sign, dmu.shape)             # (n, NGEN, n_br)
+
+    # Question: why broadcase both valid and p_gen_bk instead of p_gen_bk[valid]?
     mask = np.broadcast_to(valid[:, :, None], dmu.shape)
     branch_arr = np.broadcast_to(np.array(branches), dmu.shape)
     return pd.DataFrame({
@@ -214,73 +219,88 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
         "S_signed": S_signed[mask],
         "dmu": dmu[mask],
         "p_gen": p_gen_b[mask],
+        "flip_sign": flip_sign_b[mask],
     })
 
 
-def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
-    """Scatter of delta_mu vs (flip-signed) sensitivity over every cached config."""
-    fig, axs = plt.subplots(1, 3, figsize=(10, 4))
+def _plot_one_row(axs, pts: pd.DataFrame, row_label: str, eps: float, max_gen) -> None:
+    """Render one row of subplots (scatter, |S| hist at dmu=0, dmu hist) for a subset.
 
-    zero_dmu = pts["dmu"].abs().values <= eps # indices
+    `pts` is the subset (switch-on or switch-off) of the full points DataFrame.
+    `row_label` is prefixed to subplot titles so the rows stay self-describing.
+    """
+    zero_dmu = pts["dmu"].abs().values <= eps
+
     ax = axs[0]
-    branches = sorted(pts["branch"].unique(), key=int)
-    cmap = plt.get_cmap("tab20", len(branches))
-
-    #sns.scatterplot(data=pts[~zero_dmu], x="S_signed", y="dmu", hue="p_gen", size=5, ax=ax)
-    for i, br in enumerate(branches):
-        m = pts["branch"] == br
-        ax.scatter(pts["S_signed"][m&~zero_dmu], pts["dmu"][m&~zero_dmu],
-                   s=5, alpha=0.05, color=cmap(i), label=f"{br}",
-                   rasterized=True, linewidths=0)
+    _pts = pts[~zero_dmu]
+    c = ax.scatter(_pts["S_signed"], _pts["dmu"], c=_pts["p_gen"],
+                   s=5, alpha=0.05, rasterized=True, linewidths=0, vmin=0., vmax=max_gen)
     ax.axhline(0, color="k", lw=0.5)
     ax.axvline(0, color="k", lw=0.5)
     ax.set_xlabel(r"flip_sign $\cdot\; \partial \mu_l / \partial \mathrm{load}_{b(k)}$  at base $x$")
     ax.set_ylabel(r"$\mu_l(y_k) - \mu_l(x)$")
-    ax.set_title(
-        f"{sum(~zero_dmu):,} (config, gen, branch) points"
-    )
-    leg = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
-                    fontsize=8, ncol=1, frameon=False, title="branch",
-                    markerscale=4)
-    for lh in leg.legend_handles:
-        lh.set_alpha(1.0)
+    ax.set_title(f"{row_label} ($\\Delta\\mu \\neq 0$)")
+    cbar = plt.colorbar(c, ax=ax)
+    cbar.solids.set_alpha(1.0)
 
     ax = axs[1]
-    n, bins, _ = ax.hist(pts["S_signed"], bins=25, log=True, label="all")
+    _, bins, _ = ax.hist(pts["S_signed"], bins=25, log=True, label="all")
     ax.hist(pts["S_signed"][zero_dmu], bins=bins, log=True, label=r"$\Delta\mu=0$")
     ax.set_xlabel("sensitivity")
-    ax.set_title(r"$\Delta \mu = 0$, " + f"{sum(zero_dmu):.2g} pts")
+    ax.set_title(f"{row_label} sensitivity")
     ax.legend()
 
     ax = axs[2]
-    n, bins, _ = ax.hist(pts["dmu"], bins=25, log=True, label="all")
-    n_pos, _ = np.histogram(pts["dmu"][pts["S_signed"]>eps], bins=bins)
-    n_neg, _ = np.histogram(pts["dmu"][pts["S_signed"]<eps], bins=bins)
-    n_zer, _ = np.histogram(pts["dmu"][pts["S_signed"].abs()<eps], bins=bins)
+    _, bins, _ = ax.hist(pts["dmu"], bins=25, log=True, label="all")
+    n_pos, _ = np.histogram(pts["dmu"][pts["S_signed"] > eps], bins=bins)
+    n_neg, _ = np.histogram(pts["dmu"][pts["S_signed"] < -eps], bins=bins)
+    n_zer, _ = np.histogram(pts["dmu"][pts["S_signed"].abs() <= eps], bins=bins)
     mid = 0.5 * (bins[:-1] + bins[1:])
     ax.plot(mid, n_pos, label="S > 0")
     ax.plot(mid, n_neg, label="S < 0")
     ax.plot(mid, n_zer, label="S = 0")
     ax.set_xlabel(r"$\Delta \mu$")
+    ax.set_title(f"{row_label} $\\Delta\\mu$ histogram")
     ax.legend()
 
+
+def plot_points_all(pts: pd.DataFrame, out_path: Path, eps=1e-6) -> None:
+    """Scatter / histograms split by flip direction.
+
+    Top row: switch-on points (off -> on, flip_sign = -1).
+    Bottom row: switch-off points (on -> off, flip_sign = +1).
+    """
+    fig, axs = plt.subplots(2, 3, figsize=(10, 8))
+
+    on_pts = pts[pts["flip_sign"] < 0]
+    off_pts = pts[pts["flip_sign"] > 0]
+    max_gen = pts["p_gen"].max()
+    _plot_one_row(axs[0], on_pts, "switch-on", eps, max_gen)
+    _plot_one_row(axs[1], off_pts, "switch-off", eps, max_gen)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)
     print(f"Wrote {out_path}")
-    report_metrics(pts["S_signed"].values, pts["dmu"].values, "all configs")
+    report_metrics(on_pts["S_signed"].values, on_pts["dmu"].values, "switch-on")
+    report_metrics(off_pts["S_signed"].values, off_pts["dmu"].values, "switch-off")
 
 
 def main():
+    import time
+    t0 = time.perf_counter()
     df = pd.read_parquet(RESULTS_DIR / "dual_cache.parquet")
     sens = pd.read_parquet(RESULTS_DIR / "sensitivity_cache.parquet")
     assert np.linalg.norm(df.index - sens.index) == 0
     gen_buses = load_gen_bus_map(CASE_PATH)
+
+    print(f"loaded data {time.perf_counter() - t0:.3f}")
     #pts = collect_points(BASE_AVAIL_ID, mu, sens, gen_buses)
     #out_path = RESULTS_DIR / f"sensitivity_vs_flip_avail{BASE_AVAIL_ID}.pdf"
     #plot_points(pts, BASE_AVAIL_ID, out_path)
     pts_all = collect_points_all(df, sens, gen_buses)
+    print(f"collected points {time.perf_counter() - t0:.3f}")
     plot_points_all(pts_all, RESULTS_DIR / "sensitivity_vs_flip_all.pdf")
+    print(f"plotted points {time.perf_counter() - t0:.3f}")
     plt.show()
 
 
