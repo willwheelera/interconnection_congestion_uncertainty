@@ -1,11 +1,14 @@
 """
-Compare barrier-regularised sensitivity (dλ/dP and dμ/dP) against finite-difference
+Compare barrier-regularised sensitivity (dλ/dL and dμ/dL) against finite-difference
 estimates from DCOPF re-solves.
 
 The barrier method in sensitivity_analysis.compute_sensitivity_barrier returns
-analytical derivatives of LMPs and congestion duals w.r.t. bus power injections.
-This test verifies that the barrier sensitivity qualitatively agrees with FD
-re-solves for both LP and QP cost functions.
+analytical derivatives of LMPs and congestion duals w.r.t. bus loads.  This test
+verifies that the barrier sensitivity qualitatively agrees with FD re-solves for
+both LP and QP cost functions.
+
+FD perturbation: a +delta MW load increase at bus j, implemented as -delta MW
+injection via ``_inject_at_bus(md, bus, -delta)``.
 
 Test case: case14_gen_per_bus.json (14-bus IEEE case with one generator per bus).
 
@@ -99,8 +102,8 @@ def _constraint_slacks(orig: dict, sol: dict) -> dict[str, dict[str, float]]:
 
 
 def _fd_lmp_column(md_base: ModelData, bus_name: str, delta: float, solver: str = "gurobi") -> dict[str, float]:
-    """Return LMPs of the DCOPF perturbed by +delta MW at bus_name."""
-    md_pert = _inject_at_bus(md_base, bus_name, delta)
+    """Return LMPs of the DCOPF perturbed by +delta MW load at bus_name."""
+    md_pert = _inject_at_bus(md_base, bus_name, -delta)  # -delta injection = +delta load
     md_pert_sol = _solve_with_duals(md_pert, solver=solver)
     return _get_lmps(md_pert_sol)
 
@@ -112,8 +115,8 @@ def _fd_mu_column(
     mu_base_vals: dict[str, dict[str, float]],
     solver: str = "gurobi",
 ) -> dict[str, dict[str, float]]:
-    """Return FD estimate {key: {name: (μ_pert − μ_base) / delta}} for injection bus."""
-    md_pert = _inject_at_bus(md_base, bus_name, delta)
+    """Return FD estimate {key: {name: (μ_pert − μ_base) / delta}} for +delta load at bus."""
+    md_pert = _inject_at_bus(md_base, bus_name, -delta)  # -delta injection = +delta load
     md_pert_sol = _solve_with_duals(md_pert, solver=solver)
     lmp_pert = _get_lmps(md_pert_sol)
     pf_dual_pert = _read_pf_dual_dict(md_pert_sol)
@@ -166,18 +169,18 @@ def compare_sensitivity(
     mu_fd: dict[str, np.ndarray] = {
         key: np.zeros((len(row_names), n)) for key, row_names in dim_map.items()
     }
-    for j, inj_bus in enumerate(bus_names):
-        print(f"  FD perturbing bus {inj_bus} (+{delta:.1f} MW)...")
-        lmp_pert = _fd_lmp_column(md, inj_bus, delta, solver=solver)
+    for j, load_bus in enumerate(bus_names):
+        print(f"  FD perturbing bus {load_bus} (+{delta:.1f} MW load)...")
+        lmp_pert = _fd_lmp_column(md, load_bus, delta, solver=solver)
         for i, obs_bus in enumerate(bus_names):
             lmp_fd[i, j] = (lmp_pert[obs_bus] - lmp_base[obs_bus]) / delta
-        fd_mu_col = _fd_mu_column(md, inj_bus, delta, mu_base_vals, solver=solver)
+        fd_mu_col = _fd_mu_column(md, load_bus, delta, mu_base_vals, solver=solver)
         for key, row_names in dim_map.items():
             for r_i, name in enumerate(row_names):
                 mu_fd[key][r_i, j] = fd_mu_col[key].get(name, 0.0)
 
     # ── Compare LMP sensitivity ─────────────────────────────────────────────
-    print(f"\n{'=== LMP sensitivity dλ/dP (barrier vs FD) ':=<60}")
+    print(f"\n{'=== LMP sensitivity dλ/dL (barrier vs FD) ':=<60}")
     lmp_bar = df_lmp_bar.values
     lmp_err = np.abs(lmp_bar - lmp_fd)
     max_lmp_err = lmp_err.max()
@@ -185,7 +188,7 @@ def compare_sensitivity(
     print(f"  Max |Δ| = {max_lmp_err:.5f}  (atol = {atol})  "
           f"[{'PASS' if lmp_pass else 'FAIL'}]")
     if not lmp_pass:
-        print(f"  {'obs_bus':>8}  {'inj_bus':>8}  {'barrier':>10}  {'FD':>10}  {'Δ':>10}")
+        print(f"  {'obs_bus':>8}  {'load_bus':>8}  {'barrier':>10}  {'FD':>10}  {'Δ':>10}")
         for ij in np.argwhere(lmp_err > atol * 0.5):
             i, j = ij
             print(f"  {bus_names[i]:>8}  {bus_names[j]:>8}  "
@@ -193,7 +196,7 @@ def compare_sensitivity(
                   f"{lmp_bar[i,j]-lmp_fd[i,j]:>+10.5f}")
 
     # ── Compare μ sensitivity ────────────────────────────────────────────────
-    print(f"\n{'=== μ sensitivity dμ/dP (barrier vs FD) ':=<60}")
+    print(f"\n{'=== μ sensitivity dμ/dL (barrier vs FD) ':=<60}")
     max_mu_err = 0.0
     mu_fail = False
     for key, row_names in dim_map.items():
@@ -212,10 +215,10 @@ def compare_sensitivity(
             print(f"  {key}[{name}]: max |Δ| = {row_err:.5f}  "
                   f"[{'PASS' if row_pass else 'FAIL'}]  slack={slack:.2f} MW")
             if not row_pass:
-                for j, inj_bus in enumerate(bus_names):
+                for j, load_bus in enumerate(bus_names):
                     e = abs(bar_vals[r_i, j] - fd_vals[r_i, j])
                     if e > atol * 0.5:
-                        print(f"    ← bus {inj_bus}: "
+                        print(f"    ← bus {load_bus}: "
                               f"barrier={bar_vals[r_i,j]:+.5f}  "
                               f"FD={fd_vals[r_i,j]:+.5f}  "
                               f"Δ={bar_vals[r_i,j]-fd_vals[r_i,j]:+.5f}")

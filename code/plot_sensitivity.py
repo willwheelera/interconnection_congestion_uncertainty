@@ -110,7 +110,7 @@ def _draw_mu_heatmap(
     ax.set_yticklabels(row_names, fontsize=7)
     if not show_ylabel:
         ax.tick_params(labelleft=False)
-    ax.set_xlabel("Injection bus $j$")
+    ax.set_xlabel("Load bus $j$")
     if show_ylabel:
         ax.set_ylabel("Constraint")
     ax.set_title(title, fontsize=9)
@@ -118,7 +118,7 @@ def _draw_mu_heatmap(
 
 
 def _lmp_figure(result_sets: list[dict]) -> plt.Figure:
-    """Build the LMP sensitivity figure (base LMPs bar + dλ/dP heatmap(s))."""
+    """Build the LMP sensitivity figure (base LMPs bar + dλ/dL heatmap(s))."""
     primary = result_sets[0]
     bus_names = primary["bus_names"]
     lmp_base = primary["lmp_base"]
@@ -225,7 +225,7 @@ def _mu_figure(results: dict) -> plt.Figure | None:
         fig.colorbar(
             last_im,
             ax=heatmap_axes,
-            label=r"$\partial\mu/\partial P$ (\$/MWh per MW)",
+            label=r"$\partial\mu/\partial L$ (\$/MWh per MW)",
         )
 
         # Hide unused panels (last row may be short)
@@ -244,8 +244,8 @@ def _mu_figure(results: dict) -> plt.Figure | None:
 def plot_sensitivity(result_sets: list[dict], out_path: Path) -> None:
     """Render and save sensitivity figures to a multi-page PDF.
 
-    Page 1: base LMPs bar chart + dλ/dP heatmap(s).
-    Page 2: dμ/dP heatmaps for each non-empty constraint type (barrier results only).
+    Page 1: base LMPs bar chart + dλ/dL heatmap(s).
+    Page 2: dμ/dL heatmaps for each non-empty constraint type (barrier results only).
 
     Parameters
     ----------

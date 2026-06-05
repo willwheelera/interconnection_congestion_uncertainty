@@ -5,13 +5,16 @@ Handles both LP (linear costs) and QP (quadratic costs) by replacing the
 singular bordered-Hessian of the LP case with a regularised saddle-point
 system::
 
-    [ H + Y + D_w    J^T  ] [ dx/dP_j ]   [  0  ]
-    [ J             -D_c  ] [ dν/dP_j ] = [ e_j ]
+    [ H + Y + D_w    J^T  ] [ dx/dL_j ]   [  0   ]
+    [ J             -D_c  ] [ dν/dL_j ] = [ -e_j ]
 
 where Y is a barrier matrix built from all inequality constraints.  The primary
-outputs are the congestion dual sensitivities dμ/dP (sensitivity of line shadow
-prices to bus power injections) and the LMP sensitivities dLMP/dP as a secondary
-output.
+outputs are the congestion dual sensitivities dμ/dL (sensitivity of line shadow
+prices to bus loads) and the LMP sensitivities dLMP/dL as a secondary output.
+
+Sign convention: ``L_j`` is the active-power load at bus j.  Adding injection
+is the same as subtracting load, so dμ/dInjection = -dμ/dL.  The ``-e_j`` RHS
+chooses the load convention directly.
 
 For the mathematical derivation see docs/narrative/kkt_sensitivity.rst.
 
@@ -42,29 +45,194 @@ EPS_MU = 1.0
 EPS_X = 1.0
 
 
-def _extract_hour(md: ModelData, hour: int) -> ModelData:
-    """Return a new ModelData with all time-series values replaced by scalars at *hour*.
+def compute_sensitivity_barrier(
+    md: ModelData,
+    md_sol: ModelData,
+    lmp_base: dict[str, float],
+    pf_dual_dict: dict[str, tuple[float, float]],
+    eps_mu: float = 1.0,
+    eps_x: float = 1.0,
+    d_w: float = 1e-6,
+    d_c: float = 1e-6,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Compute LMP and congestion-dual sensitivity via the barrier-regularised KKT system.
 
-    UC solution files store most quantities as ``{"data_type": "time_series",
-    "values": [...]}`` dicts.  This helper recursively flattens them so that
-    downstream functions see plain scalar values.
+    Handles both LP (linear costs) and QP (quadratic costs).  The approach
+    replaces the singular bordered-Hessian of the LP case with a regularised
+    saddle-point system::
+
+        [ H + Y + D_w    J^T  ] [ dx/dL_j ]   [  0   ]
+        [ J             -D_c  ] [ dν/dL_j ] = [ -e_j ]
+
+    where
+
+    * **H** — objective Hessian (diagonal: 2a_g for QP generators, 0 for LP).
+    * **Y** — barrier matrix from all inequality constraints; y_k = (z_k + ε)/(s_k + ε)
+      evaluated at the optimum.  Dual values z_k are derived analytically from
+      KKT stationarity (generator bounds via LMP vs. marginal cost; thermal/DC
+      limits via LMP differences).  The contribution of each constraint k is
+      y_k · (∂s_k/∂x)^T (∂s_k/∂x) added into the upper-left block.
+    * **D_w = d_w · I** — small primal regularisation that prevents singularity
+      even when H = Y = 0 at some variable.
+    * **J** — Jacobian of *equality* constraints only (power-balance + reference
+      angle).  Active inequalities are already captured through large y_k values
+      in Y and are not included in J here.
+    * **D_c = d_c · I** — constraint-block regularisation (saddle-point stability).
+
+    The parameter ε controls the smoothing between active (s ≈ 0) and inactive
+    (z ≈ 0) constraints.  As ε → 0 with exact dual values the result converges
+    to the hard-constraint bordered-Hessian used in kkt_sensitivity.py.
+
+    For the mathematical derivation see :doc:`../narrative/kkt_sensitivity`.
+
+    Parameters
+    ----------
+    md:
+        Original (unsolved) ModelData.
+    md_sol:
+        Solved ModelData returned by ``solve_dcopf``.
+    lmp_base:
+        Dict of ``{bus_name: lmp}`` at the base solution (used to compute duals).
+    eps:
+        Barrier smoothing parameter [same units as slacks/duals, ≈ 1 MW / 1 $/MWh].
+    d_w:
+        Primal regularisation magnitude (added to H + Y diagonal).
+    d_c:
+        Constraint regularisation magnitude (subtracted from lower-right block).
+
+    Returns
+    -------
+    (df_lmp, mu_sens)
+        df_lmp: n_bus × n_bus DataFrame of dLMP_i/dL_j [$/MWh per MW].
+        mu_sens: dict with keys ``branch_upper``, ``branch_lower``, ``gen_max``,
+        ``gen_min``, ``dc_max``, ``dc_min``.  Each value is a DataFrame of
+        dμ_k/dL_j computed via the differentiated complementarity condition.
     """
-    def _resolve(obj):
-        if isinstance(obj, dict):
-            if obj.get("data_type") == "time_series":
-                return obj["values"][hour]
-            return {k: _resolve(v) for k, v in obj.items()}
-        return obj
+    orig, sol, names, idx, n, n_vars, ref_bus, base_mva = _network_state(md, md_sol)
 
-    return ModelData(_resolve(md.data))
+    # Objective Hessian H (diagonal, non-zero only for QP generators)
+    H_diag = np.zeros(n_vars)
+    for g_name, g_data in orig["gen"].items():
+        a2, _ = _poly_cost_coeffs(g_data)
+        if a2 != 0.0:
+            H_diag[n["bus"] + idx["gen"][g_name]] = 2.0 * a2
 
+    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps_mu, eps_x, pf_dual_dict)
 
-def _natkey(s: str):
-    """Sort key that orders numeric strings numerically ('2' < '10')."""
+    J_pb = _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva)
+    J_ref = np.zeros((1, n_vars))
+    J_ref[0, idx["bus"][ref_bus]] = 1.0
+    J = np.vstack([J_pb, J_ref])
+    n_eq = J.shape[0]
+
+    K = np.zeros((n_vars + n_eq, n_vars + n_eq))
+    K[:n_vars, :n_vars] = np.diag(H_diag) + Y + d_w * np.eye(n_vars)
+    K[:n_vars, n_vars:] = J.T
+    K[n_vars:, :n_vars] = J
+    K[n_vars:, n_vars:] = -d_c * np.eye(n_eq)
+
     try:
-        return (0, int(s))
-    except (ValueError, TypeError):
-        return (1, str(s))
+        K_lu = scipy.linalg.lu_factor(K)
+    except scipy.linalg.LinAlgError as exc:
+        print(f"  [barrier] LU factorisation failed ({exc}).")
+        raise
+
+    lmp_sens = np.zeros((n["bus"], n["bus"]))
+    primal_sens = np.zeros((n_vars, n["bus"]))
+    rhs = np.zeros(n_vars + n_eq)
+    for j in range(n["bus"]):
+        rhs[:] = 0.0
+        # RHS = -e_j selects the load convention: primal_sens, lmp_sens, and
+        # mu_sens come out as derivatives w.r.t. L_j directly.
+        rhs[n_vars + j] = -1.0
+        d = scipy.linalg.lu_solve(K_lu, rhs)
+        primal_sens[:, j] = d[:n_vars]
+        lmp_sens[:, j] = d[n_vars: n_vars + n["bus"]]
+
+    df_lmp = pd.DataFrame(
+        lmp_sens,
+        index=pd.Index(names["bus"], name="observed_bus (LMP_i)"),
+        columns=pd.Index(names["bus"], name="load_bus (L_j)"),
+    )
+    mu_sens = _compute_mu_sensitivity(
+        orig, sol, names, idx, n, base_mva, lmp_base, eps_mu, eps_x, primal_sens, pf_dual_dict
+    )
+    return df_lmp, mu_sens
+
+
+def _compute_mu_sensitivity(
+    orig: dict,
+    sol: dict,
+    names: dict,
+    idx: dict,
+    n: dict,
+    base_mva: float,
+    lmp_base: dict[str, float],
+    eps_mu: float,
+    eps_x: float,
+    primal_sens: np.ndarray,
+    pf_dual_dict: dict[str, tuple[float, float]],
+) -> dict[str, pd.DataFrame]:
+    """Compute inequality-constraint dual sensitivities dμ_k/dL_j.
+
+    From the differentiated complementarity condition d(X Z)/dp = 0::
+
+        dz_k/dL_j = -y_k * (∂s_k/∂x) · (dx/dL_j)
+
+    where y_k = (z_k + ε)/(s_k + ε), s_k is the slack, and dx/dL_j is the
+    primal sensitivity from the barrier system (first n_vars entries of the
+    solution vector, taken w.r.t. load at bus j).
+
+    Returns a dict with keys ``branch_upper``, ``branch_lower``, ``gen_max``,
+    ``gen_min``, ``dc_max``, ``dc_min``.  Each value is a DataFrame indexed by
+    constraint name with columns for each load bus.
+    """
+    col_idx = pd.Index(names["bus"], name="load_bus (L_j)")
+
+    branch_upper = np.zeros((len(names["branch"]), n["bus"]))
+    branch_lower = np.zeros((len(names["branch"]), n["bus"]))
+    for br_i, br_name in enumerate(names["branch"]):
+        br_data = orig["branch"][br_name]
+        if br_data.get("rating_long_term") is None:
+            continue
+        f_i = idx["bus"][br_data["from_bus"]]
+        t_i = idx["bus"][br_data["to_bus"]]
+        dtheta_diff = primal_sens[f_i, :] - primal_sens[t_i, :]
+
+        B_l = _branch_susceptance(br_data, base_mva)
+        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps_mu, eps_x, pf_dual_dict)
+        branch_upper[br_i, :] = -y_upper * B_l * dtheta_diff
+        branch_lower[br_i, :] =  y_lower * B_l * dtheta_diff
+
+    gen_max = np.zeros((len(names["gen"]), n["bus"]))
+    gen_min = np.zeros((len(names["gen"]), n["bus"]))
+    for g_i, g_name in enumerate(names["gen"]):
+        g_data = orig["gen"][g_name]
+        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x)
+        dpg = primal_sens[n["bus"] + idx["gen"][g_name], :]
+        gen_max[g_i, :] = -y_max * dpg
+        gen_min[g_i, :] =  y_min * dpg
+
+    dc_max = np.zeros((len(names["dc"]), n["bus"]))
+    dc_min = np.zeros((len(names["dc"]), n["bus"]))
+    for d_i, dc_name in enumerate(names["dc"]):
+        dc_data = orig["dc"][dc_name]
+        if dc_data.get("rating_long_term") is None:
+            continue
+        d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
+        ddcpf = primal_sens[d_col, :]
+        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps_mu, eps_x, pf_dual_dict)
+        dc_max[d_i, :] = -y_upper * ddcpf
+        dc_min[d_i, :] =  y_lower * ddcpf
+
+    return {
+        "branch_upper": pd.DataFrame(branch_upper, index=pd.Index(names["branch"], name="branch"), columns=col_idx),
+        "branch_lower": pd.DataFrame(branch_lower, index=pd.Index(names["branch"], name="branch"), columns=col_idx),
+        "gen_max": pd.DataFrame(gen_max, index=pd.Index(names["gen"], name="generator"), columns=col_idx),
+        "gen_min": pd.DataFrame(gen_min, index=pd.Index(names["gen"], name="generator"), columns=col_idx),
+        "dc_max": pd.DataFrame(dc_max, index=pd.Index(names["dc"], name="dc_branch"), columns=col_idx),
+        "dc_min": pd.DataFrame(dc_min, index=pd.Index(names["dc"], name="dc_branch"), columns=col_idx),
+    }
 
 
 def _network_state(md, md_sol):
@@ -108,6 +276,14 @@ def _network_state(md, md_sol):
     return orig, sol, names, idx, n, n_vars, ref_bus, base_mva
 
 
+def _natkey(s: str):
+    """Sort key that orders numeric strings numerically ('2' < '10')."""
+    try:
+        return (0, int(s))
+    except (ValueError, TypeError):
+        return (1, str(s))
+
+
 def _branch_susceptance(br_data, base_mva: float) -> float:
     """Return B_l [MW/rad] for a branch (accounts for transformer tap ratio)."""
     tau = (
@@ -134,7 +310,12 @@ def _marginal_cost(g_data, pg_mw: float) -> float:
 
 
 def _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva):
-    """Build the n_bus × n_vars power-balance Jacobian J_pb."""
+    """Build the n_bus × n_vars power-balance Jacobian J_pb.
+    Equations:  pf_l = B_l  (theta[l_fr] - theta[l_to])
+                     = B_l E_{li} theta_i
+                pg_i = sum_l E^T_{il} pf_l
+                dpg_i/dtheta_j = sum_l E^T_{il} B_l E_{lj}
+    """
     J_pb = np.zeros((n["bus"], n_vars))
     for br_data in orig["branch"].values():
         f_i = idx["bus"][br_data["from_bus"]]
@@ -178,37 +359,6 @@ def _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x):
         y_max = (max(lmp_b - mc, 0.0) + eps_mu) / (max(pg_max - pg_mw, 0.0) + eps_x)
     y_min = (max(mc - lmp_b, 0.0) + eps_mu) / (max(pg_mw - pg_min, 0.0) + eps_x)
     return y_max, y_min
-
-
-def _compute_mu_base(
-    md: ModelData,
-    lmp_base: dict[str, float],
-    pf_dual_dict: dict[str, tuple[float, float]],
-) -> dict[str, dict[str, float]]:
-    """Compute base dual variable values z_k at the optimal solution from KKT conditions.
-
-    Branch/DC duals are taken directly from pf_dual_dict (LP solver duals).
-    Generator duals:  z_max = max(LMP_bus − mc, 0),  z_min = max(mc − LMP_bus, 0).
-    """
-    branch_names = [n for n, _ in md.elements("branch")]
-    dc_names = [n for n, _ in md.elements("dc_branch")]
-
-    gen_max, gen_min = {}, {}
-    for g_name, g_data in md.elements("generator"):
-        pg_mw = g_data.get("pg", 0.0)
-        lmp_b = lmp_base.get(g_data["bus"], 0.0)
-        mc = _marginal_cost(g_data, pg_mw)
-        gen_max[g_name] = max(lmp_b - mc, 0.0)
-        gen_min[g_name] = max(mc - lmp_b, 0.0)
-
-    return {
-        "branch_upper": {bn: pf_dual_dict[bn][0] for bn in branch_names},
-        "branch_lower": {bn: pf_dual_dict[bn][1] for bn in branch_names},
-        "gen_max": gen_max,
-        "gen_min": gen_min,
-        "dc_max": {dn: pf_dual_dict[dn][0] for dn in dc_names},
-        "dc_min": {dn: pf_dual_dict[dn][1] for dn in dc_names},
-    }
 
 
 def _build_barrier_Y(
@@ -270,192 +420,35 @@ def _build_barrier_Y(
     return Y
 
 
-def _compute_mu_sensitivity(
-    orig: dict,
-    sol: dict,
-    names: dict,
-    idx: dict,
-    n: dict,
-    base_mva: float,
+def _compute_mu_base(
+    md: ModelData,
     lmp_base: dict[str, float],
-    eps_mu: float,
-    eps_x: float,
-    primal_sens: np.ndarray,
     pf_dual_dict: dict[str, tuple[float, float]],
-) -> dict[str, pd.DataFrame]:
-    """Compute inequality-constraint dual sensitivities dμ_k/dP_j.
+) -> dict[str, dict[str, float]]:
+    """Compute base dual variable values z_k at the optimal solution from KKT conditions.
 
-    From the differentiated complementarity condition d(X Z)/dp = 0::
-
-        dz_k/dP_j = -y_k * (∂s_k/∂x) · (dx/dP_j)
-
-    where y_k = (z_k + ε)/(s_k + ε), s_k is the slack, and dx/dP_j is the
-    primal sensitivity from the barrier system (first n_vars entries of the
-    solution vector).
-
-    Returns a dict with keys ``branch_upper``, ``branch_lower``, ``gen_max``,
-    ``gen_min``, ``dc_max``, ``dc_min``.  Each value is a DataFrame indexed by
-    constraint name with columns for each injection bus.
+    Branch/DC duals are taken directly from pf_dual_dict (LP solver duals).
+    Generator duals:  z_max = max(LMP_bus − mc, 0),  z_min = max(mc − LMP_bus, 0).
     """
-    col_idx = pd.Index(names["bus"], name="injection_bus (P_j)")
+    branch_names = [n for n, _ in md.elements("branch")]
+    dc_names = [n for n, _ in md.elements("dc_branch")]
 
-    branch_upper = np.zeros((len(names["branch"]), n["bus"]))
-    branch_lower = np.zeros((len(names["branch"]), n["bus"]))
-    for br_i, br_name in enumerate(names["branch"]):
-        br_data = orig["branch"][br_name]
-        if br_data.get("rating_long_term") is None:
-            continue
-        f_i = idx["bus"][br_data["from_bus"]]
-        t_i = idx["bus"][br_data["to_bus"]]
-        dtheta_diff = primal_sens[f_i, :] - primal_sens[t_i, :]
-
-        B_l = _branch_susceptance(br_data, base_mva)
-        y_upper, y_lower = _pf_ylim(sol["branch"], br_name, br_data, eps_mu, eps_x, pf_dual_dict)
-        branch_upper[br_i, :] = -y_upper * B_l * dtheta_diff
-        branch_lower[br_i, :] =  y_lower * B_l * dtheta_diff
-
-    gen_max = np.zeros((len(names["gen"]), n["bus"]))
-    gen_min = np.zeros((len(names["gen"]), n["bus"]))
-    for g_i, g_name in enumerate(names["gen"]):
-        g_data = orig["gen"][g_name]
-        y_max, y_min = _gen_ylim(sol, lmp_base, g_name, g_data, eps_mu, eps_x)
-        dpg = primal_sens[n["bus"] + idx["gen"][g_name], :]
-        gen_max[g_i, :] = -y_max * dpg
-        gen_min[g_i, :] =  y_min * dpg
-
-    dc_max = np.zeros((len(names["dc"]), n["bus"]))
-    dc_min = np.zeros((len(names["dc"]), n["bus"]))
-    for d_i, dc_name in enumerate(names["dc"]):
-        dc_data = orig["dc"][dc_name]
-        if dc_data.get("rating_long_term") is None:
-            continue
-        d_col = n["bus"] + n["gen"] + idx["dc"][dc_name]
-        ddcpf = primal_sens[d_col, :]
-        y_upper, y_lower = _pf_ylim(sol["dc"], dc_name, dc_data, eps_mu, eps_x, pf_dual_dict)
-        dc_max[d_i, :] = -y_upper * ddcpf
-        dc_min[d_i, :] =  y_lower * ddcpf
+    gen_max, gen_min = {}, {}
+    for g_name, g_data in md.elements("generator"):
+        pg_mw = g_data.get("pg", 0.0)
+        lmp_b = lmp_base.get(g_data["bus"], 0.0)
+        mc = _marginal_cost(g_data, pg_mw)
+        gen_max[g_name] = max(lmp_b - mc, 0.0)
+        gen_min[g_name] = max(mc - lmp_b, 0.0)
 
     return {
-        "branch_upper": pd.DataFrame(branch_upper, index=pd.Index(names["branch"], name="branch"), columns=col_idx),
-        "branch_lower": pd.DataFrame(branch_lower, index=pd.Index(names["branch"], name="branch"), columns=col_idx),
-        "gen_max": pd.DataFrame(gen_max, index=pd.Index(names["gen"], name="generator"), columns=col_idx),
-        "gen_min": pd.DataFrame(gen_min, index=pd.Index(names["gen"], name="generator"), columns=col_idx),
-        "dc_max": pd.DataFrame(dc_max, index=pd.Index(names["dc"], name="dc_branch"), columns=col_idx),
-        "dc_min": pd.DataFrame(dc_min, index=pd.Index(names["dc"], name="dc_branch"), columns=col_idx),
+        "branch_upper": {bn: pf_dual_dict[bn][0] for bn in branch_names},
+        "branch_lower": {bn: pf_dual_dict[bn][1] for bn in branch_names},
+        "gen_max": gen_max,
+        "gen_min": gen_min,
+        "dc_max": {dn: pf_dual_dict[dn][0] for dn in dc_names},
+        "dc_min": {dn: pf_dual_dict[dn][1] for dn in dc_names},
     }
-
-
-def compute_sensitivity_barrier(
-    md: ModelData,
-    md_sol: ModelData,
-    lmp_base: dict[str, float],
-    pf_dual_dict: dict[str, tuple[float, float]],
-    eps_mu: float = 1.0,
-    eps_x: float = 1.0,
-    d_w: float = 1e-6,
-    d_c: float = 1e-6,
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Compute LMP and congestion-dual sensitivity via the barrier-regularised KKT system.
-
-    Handles both LP (linear costs) and QP (quadratic costs).  The approach
-    replaces the singular bordered-Hessian of the LP case with a regularised
-    saddle-point system::
-
-        [ H + Y + D_w    J^T  ] [ dx/dP_j ]   [  0  ]
-        [ J             -D_c  ] [ dν/dP_j ] = [ e_j ]
-
-    where
-
-    * **H** — objective Hessian (diagonal: 2a_g for QP generators, 0 for LP).
-    * **Y** — barrier matrix from all inequality constraints; y_k = (z_k + ε)/(s_k + ε)
-      evaluated at the optimum.  Dual values z_k are derived analytically from
-      KKT stationarity (generator bounds via LMP vs. marginal cost; thermal/DC
-      limits via LMP differences).  The contribution of each constraint k is
-      y_k · (∂s_k/∂x)^T (∂s_k/∂x) added into the upper-left block.
-    * **D_w = d_w · I** — small primal regularisation that prevents singularity
-      even when H = Y = 0 at some variable.
-    * **J** — Jacobian of *equality* constraints only (power-balance + reference
-      angle).  Active inequalities are already captured through large y_k values
-      in Y and are not included in J here.
-    * **D_c = d_c · I** — constraint-block regularisation (saddle-point stability).
-
-    The parameter ε controls the smoothing between active (s ≈ 0) and inactive
-    (z ≈ 0) constraints.  As ε → 0 with exact dual values the result converges
-    to the hard-constraint bordered-Hessian used in kkt_sensitivity.py.
-
-    For the mathematical derivation see :doc:`../narrative/kkt_sensitivity`.
-
-    Parameters
-    ----------
-    md:
-        Original (unsolved) ModelData.
-    md_sol:
-        Solved ModelData returned by ``solve_dcopf``.
-    lmp_base:
-        Dict of ``{bus_name: lmp}`` at the base solution (used to compute duals).
-    eps:
-        Barrier smoothing parameter [same units as slacks/duals, ≈ 1 MW / 1 $/MWh].
-    d_w:
-        Primal regularisation magnitude (added to H + Y diagonal).
-    d_c:
-        Constraint regularisation magnitude (subtracted from lower-right block).
-
-    Returns
-    -------
-    (df_lmp, mu_sens)
-        df_lmp: n_bus × n_bus DataFrame of dLMP_i/dP_j [$/MWh per MW].
-        mu_sens: dict with keys ``branch_upper``, ``branch_lower``, ``gen_max``,
-        ``gen_min``, ``dc_max``, ``dc_min``.  Each value is a DataFrame of
-        dμ_k/dP_j computed via the differentiated complementarity condition.
-    """
-    orig, sol, names, idx, n, n_vars, ref_bus, base_mva = _network_state(md, md_sol)
-
-    # Objective Hessian H (diagonal, non-zero only for QP generators)
-    H_diag = np.zeros(n_vars)
-    for g_name, g_data in orig["gen"].items():
-        a2, _ = _poly_cost_coeffs(g_data)
-        if a2 != 0.0:
-            H_diag[n["bus"] + idx["gen"][g_name]] = 2.0 * a2
-
-    Y = _build_barrier_Y(orig, sol, idx, n, n_vars, base_mva, lmp_base, eps_mu, eps_x, pf_dual_dict)
-
-    J_pb = _build_power_balance_jacobian(orig, idx, n, n_vars, base_mva)
-    J_ref = np.zeros((1, n_vars))
-    J_ref[0, idx["bus"][ref_bus]] = 1.0
-    J = np.vstack([J_pb, J_ref])
-    n_eq = J.shape[0]
-
-    K = np.zeros((n_vars + n_eq, n_vars + n_eq))
-    K[:n_vars, :n_vars] = np.diag(H_diag) + Y + d_w * np.eye(n_vars)
-    K[:n_vars, n_vars:] = J.T
-    K[n_vars:, :n_vars] = J
-    K[n_vars:, n_vars:] = -d_c * np.eye(n_eq)
-
-    try:
-        K_lu = scipy.linalg.lu_factor(K)
-    except scipy.linalg.LinAlgError as exc:
-        print(f"  [barrier] LU factorisation failed ({exc}).")
-        raise
-
-    lmp_sens = np.zeros((n["bus"], n["bus"]))
-    primal_sens = np.zeros((n_vars, n["bus"]))
-    rhs = np.zeros(n_vars + n_eq)
-    for j in range(n["bus"]):
-        rhs[:] = 0.0
-        rhs[n_vars + j] = 1.0
-        d = scipy.linalg.lu_solve(K_lu, rhs)
-        primal_sens[:, j] = d[:n_vars]
-        lmp_sens[:, j] = d[n_vars: n_vars + n["bus"]]
-
-    df_lmp = pd.DataFrame(
-        lmp_sens,
-        index=pd.Index(names["bus"], name="observed_bus (LMP_i)"),
-        columns=pd.Index(names["bus"], name="injection_bus (P_j)"),
-    )
-    mu_sens = _compute_mu_sensitivity(
-        orig, sol, names, idx, n, base_mva, lmp_base, eps_mu, eps_x, primal_sens, pf_dual_dict
-    )
-    return df_lmp, mu_sens
 
 
 def save_results(
@@ -569,6 +562,23 @@ def run(solution_path: Path) -> None:
                 g_data["p_min"] = 0.0
                 g_data["p_max"] = 0.0
         _run_single(md_h, f"{stem}_h{hour:02d}", out_dir=out_dir)
+
+
+def _extract_hour(md: ModelData, hour: int) -> ModelData:
+    """Return a new ModelData with all time-series values replaced by scalars at *hour*.
+
+    UC solution files store most quantities as ``{"data_type": "time_series",
+    "values": [...]}`` dicts.  This helper recursively flattens them so that
+    downstream functions see plain scalar values.
+    """
+    def _resolve(obj):
+        if isinstance(obj, dict):
+            if obj.get("data_type") == "time_series":
+                return obj["values"][hour]
+            return {k: _resolve(v) for k, v in obj.items()}
+        return obj
+
+    return ModelData(_resolve(md.data))
 
 
 def main():

@@ -32,6 +32,11 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - Never ask for interactive inputs in python scripts
 - If a python file has a main() function, it should be concise and contain exclusively organizational logic of the program. All specific tasks, such as plot formatting, should be implemented in other functions dedicated to those purposes.
 
+### Code Execution Rules
+- **Temporary Snippets**: When running code via `python3 -c`, `bash -c`, or similar inline execution commands, **NEVER include comments**. 
+- **Permanent Files**: When writing code to actual files (e.g., `src/`, `tests/`, `config/`), **DO include comments** and explanations as normal.
+- **Distinction**: Comments are forbidden only in transient, inline code blocks passed directly to shell interpreters.   
+
 ### Writing style
 
 Use American English conventions (not British).
