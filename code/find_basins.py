@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from plot_dual_distributions import load_dual_cache
+from utils.solution_io import load_dual_cache
 from pathlib import Path
 import seaborn as sns
 
@@ -11,8 +11,8 @@ CASE_DIR = REPO_ROOT / "results" / "case14_gen_per_bus"
 
 
 def main():
-    _, mu_all = load_dual_cache(CASE_DIR)
-    mu = mu_all.abs().sum(axis=1)
+    df = load_dual_cache(CASE_DIR / "dual_cache.parquet")
+    mu = df["mu"].abs().sum(axis=1)
     #print(mu[:20])
     #for i in [83, 84, 120, 240, 360, 480, 600]:
     #    print(f"greater than {i}: {(mu > i).sum()}")
@@ -31,13 +31,15 @@ def main():
         x = ascent[x]
         df[i] = x.values
     bas, counts = np.unique(df[i-1], return_counts=True)
+    counts = np.log(counts)
     print()
-    basins = pd.DataFrame(index=bas, data=counts, columns=["counts"])
+    basins = pd.DataFrame(index=bas, data=counts, columns=["log counts"])
     basins.index.name = "basins"
     basins["mu"] = mu[bas]
     basins["avg"] = [mu[df[i-1]==v].mean() for v in basins.index]
     print(basins)
-    sns.pairplot(basins)
+    g = sns.pairplot(basins, height=2)
+    plt.savefig(CASE_DIR / "basin_stats.pdf", bbox_inches="tight")
     plt.show()
     
 
