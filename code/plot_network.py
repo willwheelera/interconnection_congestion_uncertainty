@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import numpy as np
 
 import geojson
 import matplotlib.pyplot as plt
@@ -113,6 +114,7 @@ def assign_geodata(net):
             x = net.line.at[line_idx, "x_ohm_per_km"]
             data["weight"] = (1.0 / x**0.5 if x > 0 else 1.0) * 1e-1
     positions = nx.spring_layout(g, seed=42)
+    positions[7] += np.array([0.4, 0.4])
     net.bus["geo"] = [
         geojson.dumps(geojson.Point((positions[i][0], positions[i][1])))
         for i in net.bus.index
@@ -155,7 +157,7 @@ def plot_buses(fig, ax, net, bus_xy, bus_energy):
     ys = [bus_xy[i][1] for i in net.bus.index]
     cs = [bus_energy.get(net.bus.at[i, "name"], 0.0) for i in net.bus.index]
     sc = ax.scatter(xs, ys, c=cs, cmap="viridis", s=120, zorder=5, edgecolors="k")
-    fig.colorbar(sc, ax=ax, label="Cumulative load energy (MWh)", shrink=1.0, fraction=0.04, pad=0.10)
+    fig.colorbar(sc, ax=ax, label="Load (MWh)", shrink=1.0, fraction=0.04, pad=0.10)
 
     for i in net.bus.index:
         x, y = bus_xy[i]
