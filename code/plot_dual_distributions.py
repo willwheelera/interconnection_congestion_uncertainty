@@ -125,7 +125,7 @@ def plot_lmp_vs_mu(lmp_all: pd.DataFrame, mu_all: pd.DataFrame, tol=1e-2) -> sns
     bg = df[df["hue"].isna()]
     if not bg.empty:
         g.ax_joint.scatter(bg["lmp"], bg["mu"], s=12, alpha=0.3,
-                           color="lightgray", edgecolor="none")
+                           color="white", edgecolor="gray")
     for br in mu_cols:
         sub = df[df["hue"] == br]
         if sub.empty:
@@ -165,22 +165,15 @@ def _annotate_marginal_counts(ax: plt.Axes, orient: str) -> None:
             ax.text(x, y, f"{int(count)}", ha="left", va="center", fontsize=6)
 
 
-def print_large(df):
+def print_highest(df, n=10):
     df = df.copy()
     df["total"] = df.sum(axis=1).abs()
     df = df.sort_values("total", ascending=False)
-    print(df[:10].round(0).astype(int))
+    print(df[:n].round(0).astype(int))
 
 
-def main(result_path):
-    df = load_dual_cache(result_path / "dual_cache.parquet")
-    lmp_all, mu_all = df["lmp"], df["mu"]
+def all_distributions(lmp_all, mu_all, result_path):
     n_scenarios = len(lmp_all)
-    print(f"Loaded {n_scenarios} scenarios (duals summed over hours)")
-    # print out the highest dual cases
-    print_large(mu_all)
-    print_large(lmp_all)
-
     fig, axes = plt.subplots(3, 1, figsize=(8, 9))
 
     plot_lmp_distributions(axes[0], lmp_all)
@@ -189,7 +182,16 @@ def main(result_path):
 
     fig.suptitle(f"Dual variable distributions ({result_path.name}, {n_scenarios} scenarios)", fontsize=12, y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
+    return fig
 
+
+def main(result_path):
+    df = load_dual_cache(result_path / "dual_cache.parquet")
+    lmp_all, mu_all = df["lmp"], df["mu"]
+    print_highest(mu_all)
+    print_highest(lmp_all)
+
+    fig = all_distributions(lmp_all, mu_all, result_path)
     out_path = result_path / f"dual_distributions_{result_path.name}.pdf"
     fig.savefig(out_path, bbox_inches="tight")
     print(f"Saved to {out_path}")
@@ -197,10 +199,9 @@ def main(result_path):
     g = plot_lmp_vs_mu(lmp_all, mu_all)
     scatter_path = result_path / f"lmp_vs_mu_{result_path.name}.pdf"
     g.savefig(scatter_path, bbox_inches="tight")
-    plt.show()
-    plt.close(fig)
-    plt.close(g.figure)
     print(f"Saved to {scatter_path}")
+
+    plt.show()
 
 
 if __name__ == "__main__":
