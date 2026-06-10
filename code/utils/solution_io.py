@@ -50,6 +50,14 @@ def load_generator_metadata(raw: dict) -> pd.DataFrame:
     ).T
 
 
+def load_gen_bus_map(case_path: Path) -> list[str]:
+    """Return bus name for each generator, in the canonical generator order."""
+    with open(case_path) as f:
+        case = json.load(f)
+    gens = case["elements"]["generator"]
+    return [str(g["bus"]) for g in gens.values()]
+
+
 def pg_by_fuel(pg: pd.Series, meta: pd.DataFrame) -> dict[str, float]:
     """Aggregate pg by fuel type label, returning {label: total_MW}."""
     result = {}

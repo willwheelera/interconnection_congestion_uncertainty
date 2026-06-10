@@ -36,31 +36,13 @@ import pandas as pd
 import seaborn as sns
 
 from utils.availability import id_to_avail, avail_to_id
+from utils.solution_io import load_gen_bus_map
 
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results" / "case14_gen_per_bus"
 CASE_PATH = REPO_ROOT / "data" / "case14_gen_per_bus.json"
 NGEN = 14
 BASE_AVAIL_ID = 127
-
-
-def load_gen_bus_map(case_path: Path) -> list[str]:
-    """Return bus name for each generator, in the canonical generator order."""
-    with open(case_path) as f:
-        case = json.load(f)
-    gens = case["elements"]["generator"]
-    return [str(g["bus"]) for g in gens.values()]
-
-
-def neighbor_ids(avail_id: int) -> list[int]:
-    """All NGEN configs differing from avail_id at exactly one bit."""
-    x = id_to_avail(avail_id, NGEN)
-    out = []
-    for k in range(NGEN):
-        y = x.copy()
-        y[k] = 1 - y[k]
-        out.append(avail_to_id(y))
-    return out
 
 
 def collect_points(base_id: int, mu: pd.DataFrame, sens: pd.DataFrame,
@@ -167,11 +149,8 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
     bus name); the output's "p_gen" column is the base configuration's
     generation at the bus b(k) that hosts the flipped generator k.
     """
-    # `sens` is column-ordered by (branch, bus) via _network_state's natkey
-    # sort (1, 2, 3, ..., 14).  `df["mu"]` is column-ordered lexicographically
-    # by pandas (1, 10, 11, ..., 19, 2, 20, ...), so we must reindex the mu
-    # block onto sens's branch order before any positional axis-1 ops, or the
-    # per-branch dmu and S below are taken from different branches.
+    # reindex mu block onto sens's branch order before any positional ops, 
+    # so the per-branch dmu and sensitivity correspond
     branches = sens.columns.get_level_values("branch").unique().tolist()
     bus_levels = sens.columns.get_level_values("bus").unique().tolist()
     n_br, n_bus = len(branches), len(bus_levels)
@@ -210,11 +189,17 @@ def collect_points_all(df: pd.DataFrame, sens: pd.DataFrame,
 
     p_gen_b = np.broadcast_to(p_gen_bk[:, :, None], dmu.shape)      # (n, NGEN, n_br)
     flip_sign_b = np.broadcast_to(flip_sign, dmu.shape)             # (n, NGEN, n_br)
+    config_id_b = np.broadcast_to(ids[:, None, None], dmu.shape)    # (n, NGEN, n_br)
+    gen_k_b = np.broadcast_to(np.arange(NGEN)[None, :, None], dmu.shape)
+    bus_b = np.broadcast_to(np.array(gen_buses)[None, :, None], dmu.shape)
 
-    # Question: why broadcase both valid and p_gen_bk instead of p_gen_bk[valid]?
+    # Question: why broadcast both valid and p_gen_bk instead of p_gen_bk[valid]?
     mask = np.broadcast_to(valid[:, :, None], dmu.shape)
     branch_arr = np.broadcast_to(np.array(branches), dmu.shape)
     return pd.DataFrame({
+        "config_id": config_id_b[mask],
+        "gen_k": gen_k_b[mask],
+        "bus": bus_b[mask],
         "branch": branch_arr[mask],
         "S_signed": S_signed[mask],
         "dmu": dmu[mask],
@@ -299,6 +284,7 @@ def main():
     #plot_points(pts, BASE_AVAIL_ID, out_path)
     pts_all = collect_points_all(df, sens, gen_buses)
     print(f"collected points {time.perf_counter() - t0:.3f}")
+
     plot_points_all(pts_all, RESULTS_DIR / "sensitivity_vs_flip_all.pdf")
     print(f"plotted points {time.perf_counter() - t0:.3f}")
     plt.show()

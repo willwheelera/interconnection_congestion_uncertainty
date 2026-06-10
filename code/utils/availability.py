@@ -22,3 +22,13 @@ def remove_unavailable_generators(md, availability) -> None:
     for name, avail in zip(gen_names, availability):
         if avail == 0:
             del md.data["elements"]["generator"][name]
+
+
+def get_all_neighbors(ids, NGEN):
+    bit_mask = (1 << (NGEN - 1 - np.arange(NGEN))).astype(np.int64)
+    neighbor_ids = ids[:, None] ^ bit_mask[None, :]                 # (n, NGEN)
+    return neighbor_ids
+
+
+def get_neighbor_i(ids, i):
+    return ids ^ 1<<i
