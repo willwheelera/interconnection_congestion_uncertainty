@@ -17,8 +17,9 @@ OUT_DIR = RESULTS_DIR
 
 def plot_single_mu(mu_S, ax, label=None):
     n = len(mu_S)
-    ypts = np.linspace(1, 0, n) + 1e-5 # include endpoint to compare across sample size
+    ypts = np.linspace(1, 0, n) # include endpoint to compare across sample size
     ax.plot(mu_S.sort_values(), ypts, label=label)
+    ax.set_ylim([1/16400, 1.])
     ax.set_title(mu_S.name, y=0.82, x=0.55)
 
 
