@@ -7,16 +7,16 @@ finite-difference), they are displayed side-by-side for comparison.
 
 Usage:
     # Single file
-    uv run python code/plot_sensitivity.py results/sensitivity_kkt_<case>.json
-    uv run python code/plot_sensitivity.py results/sensitivity_fd_<case>.json
+    uv run python src/plot_sensitivity.py results/sensitivity_kkt_<case>.json
+    uv run python src/plot_sensitivity.py results/sensitivity_fd_<case>.json
 
     # Side-by-side comparison
-    uv run python code/plot_sensitivity.py \\
+    uv run python src/plot_sensitivity.py \\
         results/sensitivity_kkt_<case>.json \\
         results/sensitivity_fd_<case>.json
 
     # Custom output path
-    uv run python code/plot_sensitivity.py results/sensitivity_kkt_<case>.json --out fig.pdf
+    uv run python src/plot_sensitivity.py results/sensitivity_kkt_<case>.json --out fig.pdf
 """
 
 import argparse

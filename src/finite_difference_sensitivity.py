@@ -14,8 +14,8 @@ this method serves as a numerical cross-check against sensitivity_analysis.py.
 Saves results to results/sensitivity_fd_<case>.json.
 
 Usage:
-    uv run python code/finite_difference_sensitivity.py
-    uv run python code/finite_difference_sensitivity.py --case path/to/case.json --delta 50.0
+    uv run python src/finite_difference_sensitivity.py
+    uv run python src/finite_difference_sensitivity.py --case path/to/case.json --delta 50.0
 """
 
 import argparse

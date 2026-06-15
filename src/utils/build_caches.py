@@ -21,7 +21,7 @@ Output paths (under *case_dir*):
         values: d(mu_l) / d(load_j) at the OPF solution of each row
 
 Usage:
-    uv run python code/utils/build_caches.py
+    uv run python src/utils/build_caches.py
 """
 
 from __future__ import annotations

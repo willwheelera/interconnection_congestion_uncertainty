@@ -22,7 +22,7 @@ Picks one base configuration, gathers its 14 one-flip neighbors, and plots
 is one branch's dual change for one neighbor; color encodes flip direction.
 
 Usage:
-    uv run python code/plot_sensitivity_vs_flip.py
+    uv run python src/plot_sensitivity_vs_flip.py
 """
 
 from __future__ import annotations

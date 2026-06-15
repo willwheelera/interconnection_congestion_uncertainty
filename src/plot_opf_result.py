@@ -8,9 +8,9 @@ Four panels:
   4. Branch congestion duals mu ($/MWh)
 
 Usage:
-    uv run python code/plot_opf_result.py
-    uv run python code/plot_opf_result.py --solution results/case14_gen_per_bus/opf_case14_gen_per_bus_avail16383.json.gz
-    uv run python code/plot_opf_result.py --solution path/to/result.json.gz --out fig.pdf
+    uv run python src/plot_opf_result.py
+    uv run python src/plot_opf_result.py --solution results/case14_gen_per_bus/opf_case14_gen_per_bus_avail16383.json.gz
+    uv run python src/plot_opf_result.py --solution path/to/result.json.gz --out fig.pdf
 """
 
 import argparse

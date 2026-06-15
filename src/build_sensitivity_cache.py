@@ -16,7 +16,7 @@ Output: results/<case>/sensitivity_cache.parquet, indexed by avail_id with
 a 2-level column MultiIndex (branch, bus).  Values are signed.
 
 Usage:
-    uv run python code/build_sensitivity_cache.py
+    uv run python src/build_sensitivity_cache.py
 """
 
 from __future__ import annotations

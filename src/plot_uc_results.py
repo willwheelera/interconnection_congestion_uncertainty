@@ -8,7 +8,7 @@ Produces three panels:
      available quantity to a dual variable for a MIP UC solution
 
 Usage:
-    uv run python code/plot_uc_results.py [path/to/uc_results.json]
+    uv run python src/plot_uc_results.py [path/to/uc_results.json]
 
 Defaults to data/uc_results.json if no argument is given.
 """

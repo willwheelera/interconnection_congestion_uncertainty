@@ -29,8 +29,8 @@ For QP costs the duals vary smoothly and FD provides a tighter ground truth;
 the same tolerance accommodates both regimes.
 
 Usage:
-    uv run python code/test_sensitivity_vs_fd.py
-    uv run python code/test_sensitivity_vs_fd.py --delta 0.5 --atol 0.05
+    uv run python src/test_sensitivity_vs_fd.py
+    uv run python src/test_sensitivity_vs_fd.py --delta 0.5 --atol 0.05
 """
 
 import argparse

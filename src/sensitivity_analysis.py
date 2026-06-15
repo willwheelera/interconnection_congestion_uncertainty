@@ -21,8 +21,8 @@ For the mathematical derivation see docs/narrative/kkt_sensitivity.rst.
 Saves results to results/sensitivity_barrier_<case>.json.
 
 Usage:
-    uv run python code/sensitivity_analysis.py
-    uv run python code/sensitivity_analysis.py --solution path/to/solution.json
+    uv run python src/sensitivity_analysis.py
+    uv run python src/sensitivity_analysis.py --solution path/to/solution.json
 """
 
 import argparse

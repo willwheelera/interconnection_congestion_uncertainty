@@ -7,9 +7,9 @@ The saved result includes custom fields on each branch element:
   - nu: power-flow equality constraint dual ($/MWh)
 
 Usage:
-    uv run python code/solve_opf.py
-    uv run python code/solve_opf.py --case data/case14_gen_per_bus.json
-    uv run python code/solve_opf.py --case data/case14_gen_per_bus.json --availability 1 1 0 1 ...
+    uv run python src/solve_opf.py
+    uv run python src/solve_opf.py --case data/case14_gen_per_bus.json
+    uv run python src/solve_opf.py --case data/case14_gen_per_bus.json --availability 1 1 0 1 ...
 """
 
 import argparse

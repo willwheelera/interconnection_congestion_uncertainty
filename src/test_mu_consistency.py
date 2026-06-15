@@ -18,8 +18,8 @@ where ν_l = m.dual[m.eq_pf_branch[l]] is the flow-equality dual.
 The analytical formula uses only the λ difference and omits ν_l.
 
 Usage:
-    uv run python code/test_mu_consistency.py
-    uv run python code/test_mu_consistency.py --solution results/uc_test_scuc_masked.json --hour 18
+    uv run python src/test_mu_consistency.py
+    uv run python src/test_mu_consistency.py --solution results/uc_test_scuc_masked.json --hour 18
 """
 
 import argparse

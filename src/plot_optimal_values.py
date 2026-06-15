@@ -9,9 +9,9 @@ Four panels:
   4. Line limit slack (MW) — rating − |pf| per branch; zero = congested
 
 Usage:
-    uv run python code/plot_optimal_values.py
-    uv run python code/plot_optimal_values.py --solution results/uc_test_scuc_masked.json
-    uv run python code/plot_optimal_values.py --solution results/uc_test_scuc_masked.json --out fig.pdf
+    uv run python src/plot_optimal_values.py
+    uv run python src/plot_optimal_values.py --solution results/uc_test_scuc_masked.json
+    uv run python src/plot_optimal_values.py --solution results/uc_test_scuc_masked.json --out fig.pdf
 """
 
 import argparse

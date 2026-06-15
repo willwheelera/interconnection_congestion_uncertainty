@@ -13,9 +13,9 @@ The saved result includes custom fields on each branch element:
   - nu: power-flow equality constraint dual ($/MWh)
 
 Usage:
-    uv run python code/solve_uc.py
-    uv run python code/solve_uc.py --case path/to/case.json
-    uv run python code/solve_uc.py --case path/to/case.json --availability 1 1 0 1 ...
+    uv run python src/solve_uc.py
+    uv run python src/solve_uc.py --case path/to/case.json
+    uv run python src/solve_uc.py --case path/to/case.json --availability 1 1 0 1 ...
 """
 
 import argparse

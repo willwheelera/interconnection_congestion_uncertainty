@@ -3,7 +3,7 @@ Plot distributions of dual variables (lambda/LMP and mu) across all
 UC solutions in results/gen8_four_bus.
 
 Usage:
-    uv run python code/plot_dual_distributions.py
+    uv run python src/plot_dual_distributions.py
 """
 
 import gzip

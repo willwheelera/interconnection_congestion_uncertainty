@@ -9,7 +9,7 @@ method (Kroese 2011) tunes a Bernoulli proposal q so it puts mass on
 scenarios with large target H(x) = sum_b mu(x)_b**2.
 
 Usage:
-    uv run python code/bernoulli_sampler.py
+    uv run python src/bernoulli_sampler.py
 """
 
 from pathlib import Path

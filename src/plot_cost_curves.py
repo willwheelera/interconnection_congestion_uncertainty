@@ -1,7 +1,7 @@
 """Plot piecewise-linear cost curves of thermal generators in an EGRET UC JSON.
 
 Usage:
-    uv run python code/plot_cost_curves.py [path_to_json]
+    uv run python src/plot_cost_curves.py [path_to_json]
 
 Default input: Egret/egret/models/tests/uc_test_instances/test_scuc_masked.json
 """
