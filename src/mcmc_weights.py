@@ -11,6 +11,7 @@ from scipy.stats import sem
 
 from plot_dual_distributions import load_dual_cache
 from pathlib import Path
+import time
 
 NGEN = 14
 BERNOULLI_PARAMETERS = np.full(NGEN, 0.1)
@@ -21,24 +22,27 @@ REPO_ROOT = Path(__file__).parent.parent
 
 
 def run():
-    lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")
+    t0 = time.perf_counter()
+    path = REPO_ROOT / "results" / "case14_gen_per_bus" / "dual_cache.parquet"
+    df = load_dual_cache(path)
+    lmp_df, mu_df = df["lmp"], df["mu"]
     #mu_df = pd.read_parquet(REPO_ROOT / "results" / "fake_data" / "dual_cache.parquet")
     #S = mu_df.sum(axis=1)
     #m, s = true_average(S)
     #print(f"true avg {m:.3f} {s:.3f}")
 
+    print("start", time.perf_counter() - t0)
     x0 = id_to_avail(16383, NGEN)
     trace, weights, acc = run_mc_w(x0, mu_df, n_iter=200)
+    print("weights finished", time.perf_counter() - t0)
     x0 = id_to_avail(16383, NGEN)
     trace_p, acc = run_mc_p(x0, mu_df, n_iter=200)
+    print("raw finished", time.perf_counter() - t0)
     print(f"acceptance {acc:.2f}")
-    plot_threshold_results(mu_df, trace, weights)
-    plot_threshold_results(mu_df, trace_p, np.ones(len(trace)))
+    plot_threshold_results(mu_df, trace, weights, label="weights")
+    plot_threshold_results(mu_df, trace_p, np.ones(len(trace)), label="raw")
+    print("plots finished", time.perf_counter() - t0)
     plt.show()
-
-
-def target_threshold(df, x, threshold=300.):
-    return df[avail_to_id(x)].values > threshold
 
 
 def run_mc_w(x0, df, n_iter=100):
@@ -167,20 +171,28 @@ def true_average(S):
     return m / norm, np.sqrt(var)
 
 
-def plot_threshold_results(df, trace, weights):
+def plot_threshold_results(df, trace, weights, label=""):
     avg = np.average(trace[100:], axis=0, weights=weights[100:])
     print("avg", np.around(avg, 3))
+    t0 = time.perf_counter()
     mean, sdev = true_average(df)
+    print("  true avg", time.perf_counter() - t0)
 
-    fig, axs = plt.subplots(4, 5, figsize=(8, 6))
+    fig, axs = plt.subplots(4, 5, figsize=(8, 6), sharex=True, sharey=True)
     rb = _reblock(trace, 100, weights)
-    trace_mean = np.cumsum((trace.T*weights)[..., ::-1], axis=-1) / np.cumsum(weights[::-1])
+    print("  reblock", time.perf_counter() - t0)
+    trace_mean = np.cumsum((trace.T*weights)[..., ::1], axis=-1) / np.cumsum(weights[::1])
+    print("  trace mean", time.perf_counter() - t0)
+    trace_mean = np.cumsum((trace.T*weights)[..., ::1], axis=-1) / np.cumsum(weights[::1])
     for i, ax in enumerate(axs.ravel()):
         ax.plot(trace[:, :, i], lw=0.2, label="trace")
         #x = np.linspace(0, trace.shape[0], 100)
         #ax.plot(x, rb[:, :, i], label="reblocked")
-        ax.plot(trace_mean[i].T[::-1], label="trace_mean", lw=0.2)
+        ax.plot(trace_mean[i].T[::1], label="trace_mean", lw=0.2)
         ax.axhline(mean[str(i+1)], lw=0.2, c="k", ls=":")
+        ax.set_title(f"{i+1}", y=.9)
+    print("  subplots", time.perf_counter() - t0)
+    fig.suptitle(label)
     plt.legend()
 
     plt.figure()
