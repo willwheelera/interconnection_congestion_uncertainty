@@ -12,6 +12,10 @@ uv run python script.py  # Run a script in the project environment
 uv add <package>     # Add a new dependency
 ```
 
+Specific dependencies where the codebase is a helpful reference:
+The EGRET source is installed at .venv/lib/python3.14/site-packages/egret/ — consult it for the real API.
+The gridstatusio source is installed at .venv/lib/python3.14/site-packages/gridstatusio/ — consult it for the real API.
+
 ## Project Structure
 
 This is a research project focused on electricity market optimization and analysis.
@@ -21,9 +25,8 @@ This is a research project focused on electricity market optimization and analys
 The primary quantity of interest is the **sensitivity of congestion dual variables (μ) to power injections** — e.g. how does the shadow price of a line's thermal limit change when a generator at a given bus produces more power. Important note: we are interested in all dual variables, not just LMPs. When implementing or discussing sensitivity analysis, always compute both dλ/dP and dμ/dP.
 
 - **`code/`** — All project code using EGRET goes here (optimization models, experiments, analysis scripts).
-- **`Egret/`** — Local editable install of [EGRET](https://github.com/grid-parity-exchange/Egret) (`gridx-egret`), a Pyomo-based library for electrical grid optimization. Changes here affect the installed package directly.
 - **`wholesale_data/`** — ICE electricity price Excel data (2022–2025) and a plotting script (`plot_wholesale_prices.py`).
-- **`proposal_figures/`** — Scripts to generate research proposal figures (MCMC sampling visualization, circle problem illustration). Run scripts from within that directory so PDFs are saved correctly.
+- **`proposal_figures/`** — Scripts to generate figures from the proposal (MCMC sampling visualization, circle problem illustration). Run scripts from within that directory so PDFs are saved correctly.
 
 ### Code Style
 - Each file implements one idea. Different approaches are implemented in different files. Calculation, post-processing, and plotting are all implemented in separate files.
@@ -34,18 +37,20 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 
 ### Code Execution Rules
 - **Temporary Snippets**: When running code via `python3 -c`, `bash -c`, or similar inline execution commands, **NEVER include comments**. 
-- **Permanent Files**: When writing code to actual files (e.g., `src/`, `tests/`, `config/`), **DO include comments** and explanations as normal.
+- **Permanent Files**: When writing code to actual files (e.g., `src/`, `tests/`, `config/`), include concise comments and explanations as normal.
 - **Distinction**: Comments are forbidden only in transient, inline code blocks passed directly to shell interpreters.   
 
 ### Writing style
 
 Use American English conventions (not British).
 
-The following are not words, do not use them in writing:
+Avoid non-standard compound words in writing. Examples include (do not use these words):
 - pushforward
 - copperplate
 
-LaTeX coding style:
+Variable and function names in code are not restricted.
+
+### LaTeX coding style:
 - Each sentence is on its own line.
 - Where appropriate sentence parts can be split across lines (colons, semicolons, and lists, may fall into this category when the parts are long).
 - Line length is unlimited. There is no need to add line breaks to keep lines under a character limit.
@@ -53,7 +58,7 @@ LaTeX coding style:
 
 ## EGRET Library Overview
 
-EGRET (`Egret/egret/`) provides:
+EGRET (`.venv/lib/python3.14/site-packages/egret/`) provides:
 
 - **`egret.data.model_data.ModelData`** — Central data structure used across all model formulations. Grid topology, generator parameters, etc. are stored here.
 - **`egret.models`** — Ready-to-run optimization models: `unit_commitment`, `dcopf`, `acopf`, `copperplate_dispatch`, etc.
@@ -68,22 +73,3 @@ EGRET (`Egret/egret/`) provides:
 - **Ipopt** is required for NLP problems (ACOPF, AC relaxations).
 - Commercial solvers (Gurobi, CPLEX) enable the full EGRET test suite.
 
-## Development Testing
-
-When testing code during development: 
-- Do not run commands that contain a quoted newline followed by a #-prefixed line
-- Temporarily remove commented lines from the code snippet for these tests, to avoid unnecessary "This command requires approval" bottlenecks
-
-
-## Running EGRET Tests
-
-```bash
-# From the EGRET models/tests directory:
-cd Egret/egret/models/tests
-uv run pytest test_unit_commitment.py
-uv run pytest test_dcopf.py
-
-# Run all EGRET tests:
-cd Egret
-uv run pytest
-```
