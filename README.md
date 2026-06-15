@@ -1,10 +1,29 @@
 # AMPS — Electricity Market Sensitivity Analysis
 
-Research project studying the sensitivity of congestion dual variables (shadow prices of line thermal limits) to power injections in DC optimal power flow and unit commitment problems.
+Research project studying congestion dual variables (shadow prices of line thermal limits) over different generator availability in DC optimal power flow and unit commitment problems.
 
 ## Research goal
 
-The primary quantity of interest is **dμ/dP**: how does the shadow price of a branch's thermal limit change when a generator at a given bus produces more power?  LMPs (power-balance duals) are computed as a secondary output.  The motivation is identifying which generators most influence transmission congestion — useful for market analysis and generator siting.
+The overall goal is estimating distribution of locational marginal prices (LMPs) given a probability function for every combination of generators (available or not available) — useful for market analysis and generator siting.
+Our study focuses on predicting transmission congestion, the main driver of high LMPs.
+Specifically, given a transmission network and a probability function for generator configurations, we ask: "what is the probability that the congestion shadow price of line l exceeds a threshold value?"
+The space of generator configurations is too large to enumerate, necessitating a reliable sampling scheme.
+Since congestion is relatively rare and difficult to predict, importance sampling is likely needed.
+
+A candidate importance function is the prior probability times the sum of shadow prices across the network for each generator configuration.
+The normalization for this function is unknown.
+A local scheme for biasing acceptance probabilities and move proposals in exchange for importance weights is preferable.
+"Local" means informed by neighbors, i.e., configurations that differ by one generator (on/off).
+The increase or decrease in congestion prices from a configuration to its neighbor can inform move proposal and acceptance.
+
+The main point of interest is very large values of mu, which are rare.
+Finding the probability of rare events is difficult using random sampling.
+We consider approaches that use an ascent strategy to locate local maxima, and calculate corresponding weights to determine probabilities.
+
+To save on computation, we propose estimating the change in congestion through sensitivity.
+For linear cost, congestion (mu) is piecewise constant.
+In practice, the costs have small quadratic terms, leading to piecewise linear mu; but critically, they are still discontinuous, making derivatives useless.
+We aim for a proxy based on barrier methods (such as IPOPT) and assess its usefulness in predicting the actual change in mu.
 
 ## Setup
 
