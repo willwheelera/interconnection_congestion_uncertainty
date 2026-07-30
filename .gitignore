@@ -26,3 +26,6 @@ docs/_static
 Egret/
 
 
+
+# Slurm job logs
+slurm/

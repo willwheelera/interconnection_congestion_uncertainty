@@ -138,6 +138,14 @@ HARNESS_CASE=2025 HARNESS_THREADS=2 \
 Subset modes for sanity checks (no full enumeration): `--mode random --n 30000`,
 `--mode leq_k --k 5`.
 
+On a cluster (UVM VACC), `sbatch src/texas/sweep_vacc.slurm`. The job derives
+`HARNESS_THREADS` from `--cpus-per-task`, stops itself just before the walltime, and
+resubmits so the next link resumes from the parts already written. Measured footprint on
+the 104-contingency 2025 case: ~2.8 GB resident (8 workers + manager), ~180 s per 2000-config
+chunk at 2 threads/worker. **Gurobi licensing is the blocker to settle first** — the harness
+has no non-Gurobi path, and a node-locked workstation license will not validate on a compute
+node.
+
 ### Rebuild the derived datasets (fast; run in this order after any sweep)
 ```bash
 uv run python -m texas.consolidate_s_cache   # mu_cache      -> S_cache.parquet
