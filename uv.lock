@@ -7,6 +7,9 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "lxml", specifier = ">=6.0" }]
+
 [[package]]
 name = "accessible-pygments"
 version = "0.0.5"
@@ -31,8 +34,9 @@ wheels = [
 [[package]]
 name = "amps"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "gridstatus" },
     { name = "gridstatusio" },
     { name = "gridx-egret" },
     { name = "gurobipy" },
@@ -45,6 +49,7 @@ dependencies = [
     { name = "pytz" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -56,6 +61,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gridstatus", specifier = ">=0.34.0" },
     { name = "gridstatusio", specifier = ">=0.5.6" },
     { name = "gridx-egret", git = "https://github.com/grid-parity-exchange/Egret.git" },
     { name = "gurobipy", specifier = ">=13.0.1" },
@@ -68,6 +74,7 @@ requires-dist = [
     { name = "pytz", specifier = ">=2026.2" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "tzdata", specifier = ">=2025.3" },
 ]
 
 [package.metadata.requires-dev]

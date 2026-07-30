@@ -1,0 +1,166 @@
+{
+  "n_total": 2756,
+  "n_kept": 33,
+  "stress_configs": [
+    "all_off",
+    "all_on",
+    "half0",
+    "half1",
+    "half2",
+    "half3",
+    "half4",
+    "half5",
+    "half6",
+    "half7",
+    "half8",
+    "half9",
+    "half10",
+    "half11",
+    "half12",
+    "half13",
+    "half14",
+    "half15",
+    "half16",
+    "half17",
+    "half18",
+    "half19",
+    "half20",
+    "half21",
+    "half22",
+    "half23"
+  ],
+  "contingencies": {
+    "68": {
+      "n_configs_bound": 26,
+      "max_mu": 1821.6124912489186
+    },
+    "10": {
+      "n_configs_bound": 26,
+      "max_mu": 1241.076978922991
+    },
+    "464": {
+      "n_configs_bound": 26,
+      "max_mu": 254.9751233234971
+    },
+    "768": {
+      "n_configs_bound": 22,
+      "max_mu": 109.99234434809028
+    },
+    "329": {
+      "n_configs_bound": 15,
+      "max_mu": 104.49121200113963
+    },
+    "330": {
+      "n_configs_bound": 15,
+      "max_mu": 104.49117300156124
+    },
+    "1072": {
+      "n_configs_bound": 26,
+      "max_mu": 85.13285192609335
+    },
+    "1073": {
+      "n_configs_bound": 26,
+      "max_mu": 85.13077846668764
+    },
+    "320": {
+      "n_configs_bound": 26,
+      "max_mu": 72.22752555953107
+    },
+    "1561": {
+      "n_configs_bound": 26,
+      "max_mu": 62.81059656921102
+    },
+    "459": {
+      "n_configs_bound": 26,
+      "max_mu": 59.48139175874161
+    },
+    "60": {
+      "n_configs_bound": 4,
+      "max_mu": 40.28424658764774
+    },
+    "629": {
+      "n_configs_bound": 14,
+      "max_mu": 38.589278272440694
+    },
+    "1408": {
+      "n_configs_bound": 14,
+      "max_mu": 36.102745478830364
+    },
+    "191": {
+      "n_configs_bound": 26,
+      "max_mu": 36.08879031824427
+    },
+    "328": {
+      "n_configs_bound": 7,
+      "max_mu": 33.52698226033421
+    },
+    "1222": {
+      "n_configs_bound": 2,
+      "max_mu": 24.858810216687257
+    },
+    "2779": {
+      "n_configs_bound": 14,
+      "max_mu": 16.797355340171993
+    },
+    "426": {
+      "n_configs_bound": 8,
+      "max_mu": 15.509189789088401
+    },
+    "484": {
+      "n_configs_bound": 8,
+      "max_mu": 15.509176868785353
+    },
+    "1772": {
+      "n_configs_bound": 10,
+      "max_mu": 9.350122387337858
+    },
+    "2522": {
+      "n_configs_bound": 9,
+      "max_mu": 7.667466723542456
+    },
+    "1250": {
+      "n_configs_bound": 11,
+      "max_mu": 6.206546103761542
+    },
+    "1292": {
+      "n_configs_bound": 14,
+      "max_mu": 5.983157066740452
+    },
+    "2355": {
+      "n_configs_bound": 30,
+      "max_mu": 5.64078748102971
+    },
+    "805": {
+      "n_configs_bound": 27,
+      "max_mu": 5.610231802373315
+    },
+    "152": {
+      "n_configs_bound": 16,
+      "max_mu": 4.758337456385225
+    },
+    "2451": {
+      "n_configs_bound": 26,
+      "max_mu": 3.645456133289272
+    },
+    "2356": {
+      "n_configs_bound": 21,
+      "max_mu": 1.756906586533375
+    },
+    "1921": {
+      "n_configs_bound": 11,
+      "max_mu": 0.9595868512949685
+    },
+    "562": {
+      "n_configs_bound": 1,
+      "max_mu": 0.11665231330774564
+    },
+    "951": {
+      "n_configs_bound": 4,
+      "max_mu": 0.11011933763996164
+    },
+    "815": {
+      "n_configs_bound": 2,
+      "max_mu": 0.08018563613587965
+    }
+  }
+}

@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "gridstatus>=0.34.0",
     "gridstatusio>=0.5.6",
     "gridx-egret",
     "gurobipy>=13.0.1",
@@ -17,7 +18,22 @@ dependencies = [
     "pytz>=2026.2",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
+    "tzdata>=2025.3",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# src/ is the import root: every module/package under it (utils, grid_data,
+# tail_sampling, the loose top-level scripts) is importable by name once the
+# project is installed editable, with no sys.path manipulation.
+only-include = ["src"]
+sources = ["src"]
+
+[tool.uv]
+override-dependencies = ["lxml>=6.0"]
 
 [tool.uv.sources]
 gridx-egret = { git = "https://github.com/grid-parity-exchange/Egret.git" }
