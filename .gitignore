@@ -7,10 +7,9 @@ wheels/
 *.egg-info
 
 # Data
-# Sweep outputs are regenerable and large. The per-case relief_set_slim.json files are
-# the exception: they are sweep INPUTS (HARNESS_RELIEF_SET) produced by
-# select_relief_set.py, so they are tracked via `git add -f` and this rule no longer
-# applies to them. A new case needs its own forced add.
+# Sweep outputs only: everything here is regenerable from the tracked data/ inputs.
+# Sweep INPUTS never live here -- select_relief_set writes its relief bus set to
+# data/<case>_relief_set.json precisely so it stays tracked.
 results/
 
 # Virtual environments

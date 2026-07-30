@@ -6,8 +6,8 @@ generator is still a column the solver factorizes on every warm re-solve. This s
 diverse config sample under FULL relief (every load bus), collects the union of buses
 that actually shed, and checks that restricting relief to that set reproduces the scalar
 target S on a fresh HELD-OUT config sample (the set is frozen before the held-out actives
-are seen, so it is a real generalization test). The set is written for sample_harness,
-which reads it from HARNESS_RELIEF_SET.
+are seen, so it is a real generalization test). The set is written to the active case's
+data/ relief file (CASE_REGISTRY "relief"), which sample_harness loads by default.
 
 The full sweep additionally saves, per config, the worst line overload and the system-wide
 shed: any config needing a bus outside the set stays feasible via overload / the system
@@ -15,8 +15,8 @@ slack and is flagged there for a full-relief recheck. This validation bounds how
 that will happen.
 
 Usage:
-    uv run python src/texas/select_relief_set.py
-    uv run python src/texas/select_relief_set.py --collect 400 --validate 200
+    HARNESS_CASE=2025 uv run python src/texas/select_relief_set.py
+    HARNESS_CASE=2025 uv run python src/texas/select_relief_set.py --collect 400 --validate 200
 """
 
 import argparse
@@ -38,10 +38,11 @@ from load_averaged_target import (add_queue_generators, add_lostload_generators_
 from soft_limits import enable_soft_limits, thermal_violations
 from sample_harness import (set_emergency_factor, solve_config, EMERGENCY_FACTOR,
                             ORDC_C_MIN, ORDC_C_MAX, ORDC_BLOCKS, SHADOW_PRICE_CAP,
-                            CASE, QUEUE, COLLECTION, RESULTS_NAME)
+                            CASE, QUEUE, COLLECTION, RELIEF_FILE)
 
-RESULTS = REPO_ROOT / "results" / RESULTS_NAME
-RELIEF_SET = RESULTS / "relief_set_slim.json"
+# A sweep input, not a sweep output: written to data/ beside the case it belongs to,
+# named by the active case's CASE_REGISTRY entry.
+RELIEF_SET = RELIEF_FILE
 SHED_TOL_MW = 0.05      # a relief generator counts as active above this shed
 DS_TOL = 1.0            # $/MWh; |S_full - S_slim| below this is numerical noise
 
@@ -141,7 +142,6 @@ def main():
     print(f"  slim system shed max {shed_slim.max():.2f} MW (nonzero => slim relief fell short)")
 
     final = sorted(relief_set.union(*active_val))
-    RESULTS.mkdir(parents=True, exist_ok=True)
     RELIEF_SET.write_text(json.dumps(final))
     verdict = "PASS" if dS.max() <= DS_TOL else "REVIEW (S mismatch on held-out)"
     print(f"\n{verdict}: wrote {len(final)} relief buses -> {RELIEF_SET}")

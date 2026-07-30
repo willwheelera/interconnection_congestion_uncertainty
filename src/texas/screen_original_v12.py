@@ -22,7 +22,8 @@ Outputs:
       set filtered to the kept names; the SCDCOPF the v12 sweep solves.
 
 Usage:
-    uv run python src/texas/screen_original_v12.py
+    HARNESS_CASE=original_v12 HARNESS_RELIEF_SET=all \
+      uv run python src/texas/screen_original_v12.py
 """
 
 import json

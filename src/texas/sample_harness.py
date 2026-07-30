@@ -57,14 +57,18 @@ from soft_limits import enable_soft_limits, thermal_violations
 # screen_harness_recipe.py, which screens at this recipe rather than the JSON's native 1.5.
 CASE_REGISTRY = {
     "2025": dict(screened="activsg2000_2025_screened.json",
-                 full="activsg2000_2025.json", results="activsg2000_2025"),
+                 full="activsg2000_2025.json", relief="activsg2000_2025_relief_set.json",
+                 results="activsg2000_2025"),
     "original_v12": dict(screened="activsg2000_original_v12_screened.json",
-                         full="activsg2000.json", results="activsg2000_original_v12"),
+                         full="activsg2000.json",
+                         relief="activsg2000_original_v12_relief_set.json",
+                         results="activsg2000_original_v12"),
 }
 ACTIVE_CASE = os.environ.get("HARNESS_CASE", "2025")
 _spec = CASE_REGISTRY[ACTIVE_CASE]
 CASE = REPO_ROOT / "data" / _spec["screened"]
 FULL_CASE = REPO_ROOT / "data" / _spec["full"]
+RELIEF_FILE = REPO_ROOT / "data" / _spec["relief"]
 RESULTS_NAME = _spec["results"]
 QUEUE = REPO_ROOT / "data" / "activsg2000_queue20.json"
 COLLECTION = REPO_ROOT / "data" / "activsg2000_load_collection.json"
@@ -86,12 +90,19 @@ SHADOW_PRICE_CAP = 3500.0
 SOLVER_THREADS = int(os.environ.get("HARNESS_THREADS", "0"))
 
 # Restrict the nodal ORDC relief to a chosen bus set (a json list of bus ids from
-# select_relief_set.py) instead of every load bus; None = all load buses. Only buses
-# that ever shed need relief, so slimming shrinks the LP ~5x. A config that needs a
-# bus not in the set stays feasible via line overload / the system slack, which the
-# saved max-overload and load-shed columns expose for a later full-relief recheck.
+# select_relief_set.py) instead of every load bus. Only buses that ever shed need
+# relief, so slimming shrinks the LP ~5x. A config that needs a bus not in the set
+# stays feasible via line overload / the system slack, which the saved max-overload
+# and load-shed columns expose for a later full-relief recheck.
+# Defaults to the active case's registry relief set, so a sweep gets the same relief
+# the set was validated against without depending on an env var being set correctly.
+# HARNESS_RELIEF_SET overrides with another file; "all" means every load bus (None),
+# which is what select_relief_set collects under and what a full-relief recheck needs.
 _relief_file = os.environ.get("HARNESS_RELIEF_SET", "")
-RELIEF_BUSES = set(json.loads(Path(_relief_file).read_text())) if _relief_file else None
+if _relief_file == "all":
+    RELIEF_BUSES = None
+else:
+    RELIEF_BUSES = set(json.loads(Path(_relief_file or RELIEF_FILE).read_text()))
 
 # Post-contingency overflow (per-unit) above which a dropped contingency is
 # judged violated at the screened optimum -- ~0.01 MW on a 100 MVA base.

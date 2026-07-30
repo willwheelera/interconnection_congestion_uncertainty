@@ -9,9 +9,9 @@ stay slack at 1.5, so a set screened at 1.5 can omit binders the sweep needs.
 
 This screens by driving the stress configs through the harness solve itself, so the kept
 set matches the recipe the sweep uses. The harness reads the full case, so all of its
-contingencies are candidates. HARNESS_RELIEF_SET must name the active case's relief bus
-set (the one its sweep runs with) -- screening under more relief than the sweep gets would
-understate congestion and drop binders.
+contingencies are candidates. The relief buses must be the active case's sweep relief set
+(the harness default) -- screening under more relief than the sweep gets would understate
+congestion and drop binders, so an override to another file or to "all" is rejected.
 
 Outputs (names from the harness CASE_REGISTRY entry for HARNESS_CASE):
   data/<case>_contingencies_screened.json  -- kept names + diagnostics.
@@ -19,8 +19,7 @@ Outputs (names from the harness CASE_REGISTRY entry for HARNESS_CASE):
       names; the SCDCOPF the sweep solves.
 
 Usage:
-    HARNESS_CASE=2025 HARNESS_RELIEF_SET=results/activsg2000_2025/relief_set_slim.json \
-      uv run python src/texas/screen_harness_recipe.py
+    HARNESS_CASE=2025 uv run python src/texas/screen_harness_recipe.py
 """
 
 import json
@@ -32,11 +31,10 @@ sys.path.insert(0, str(REPO_ROOT / "src" / "texas"))
 
 from sample_harness import (ACTIVE_CASE, CASE, EMERGENCY_FACTOR, FULL_CASE, ORDC_BLOCKS,
                             ORDC_C_MAX, ORDC_C_MIN, ParallelTarget, RELIEF_BUSES,
-                            RESULTS_NAME, SHADOW_PRICE_CAP)
+                            RELIEF_FILE, SHADOW_PRICE_CAP)
 from screen_contingencies import stress_configs
 
 QUEUE = REPO_ROOT / "data" / "activsg2000_queue20.json"
-RELIEF_FILE = REPO_ROOT / "results" / RESULTS_NAME / "relief_set_slim.json"
 OUT_CASE = CASE
 OUT_LIST = CASE.parent / CASE.name.replace("_screened.json", "_contingencies_screened.json")
 
@@ -45,8 +43,8 @@ def check_relief_matches_sweep() -> None:
     """Require the resolved relief buses to be the active case's sweep relief set."""
     want = set(json.loads(RELIEF_FILE.read_text()))
     assert RELIEF_BUSES == want, (
-        f"HARNESS_RELIEF_SET must resolve to {RELIEF_FILE} ({len(want)} buses); "
-        f"got {'unset (all load buses)' if RELIEF_BUSES is None else f'{len(RELIEF_BUSES)} buses'}")
+        f"relief buses must be {RELIEF_FILE} ({len(want)} buses); got "
+        f"{'all load buses (HARNESS_RELIEF_SET=all)' if RELIEF_BUSES is None else f'{len(RELIEF_BUSES)} buses'}")
 
 
 def contingency_of(constraint_id: str) -> str:

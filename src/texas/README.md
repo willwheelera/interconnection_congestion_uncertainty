@@ -45,8 +45,9 @@ ingredients make the μ distribution realistic rather than degenerate — see
 
 **Slim relief.** A full relief generator at every load bus enlarges the LP ~5× (an
 inactive relief column is still factorized on every warm re-solve). Only 9 of 1125 load
-buses ever shed, so relief is restricted to those (`relief_set_slim.json`, wired via
-`HARNESS_RELIEF_SET`). The full sweep additionally records per configuration the worst
+buses ever shed, so relief is restricted to those. The set is a sweep *input*: it lives in
+`data/<case>_relief_set.json`, named by the case's `CASE_REGISTRY` entry and loaded by
+default. The full sweep additionally records per configuration the worst
 line overload and the system-wide shed (`snapmax_cache`), so any configuration that needed
 a bus outside the 9 would show up as a large overload or nonzero shed for a full-relief
 recheck. Over the full `2^20` sweep the max overload was 5.64 MW and no configuration shed
@@ -63,7 +64,7 @@ All in `sample_harness.py`:
 | `ORDC_BLOCKS` | 8 | relief piecewise blocks (`HARNESS_ORDC_BLOCKS`) |
 | `SHADOW_PRICE_CAP` | 3500 | μ cap ($/MWh) |
 | `SOLVER_THREADS` | 0 (Gurobi default) | Gurobi threads per worker (`HARNESS_THREADS`) |
-| `RELIEF_BUSES` | from `HARNESS_RELIEF_SET` | slim relief bus set (None = every load bus) |
+| `RELIEF_BUSES` | case's `data/<case>_relief_set.json` | slim relief bus set (`HARNESS_RELIEF_SET` overrides with another file, or `all` for every load bus) |
 
 The harness pins 8 worker processes, one per load snapshot; each builds its SCDCOPF once
 with all 20 candidates present and toggles generator bounds per configuration (warm
@@ -87,7 +88,7 @@ start). With 8 workers on 20 cores, set `HARNESS_THREADS` to avoid oversubscript
    load_averaged_target.py   soft_limits.py   sample_harness.py::ParallelTarget
         │
         ▼   (one-time calibration / selection)
-   check_relief_curve_mu   sweep_capped_target   select_relief_set ─► relief_set_slim.json (9 buses)
+   check_relief_curve_mu   sweep_capped_target   select_relief_set ─► data/<case>_relief_set.json
         │
         ▼   (exhaustive ground truth — the expensive step, ~5.6 h)
    enumerate_configs --mode full ─► results/activsg2000/mu_cache/       (id,n_on,constraint,μ)
@@ -112,8 +113,8 @@ uv run python src/texas/convert_model.py           # -> data/activsg2000.json
 uv run python src/texas/screen_contingencies.py    # -> data/activsg2000_screened.json
 # Screen at the recipe the sweep solves (factor 1.2 + ORDC + cap) instead of the JSON's
 # native 1.5 -- required for any case a sweep runs on:
-HARNESS_CASE=2025 HARNESS_RELIEF_SET=results/activsg2000_2025/relief_set_slim.json \
-  uv run python src/texas/screen_harness_recipe.py  # -> data/activsg2000_2025_screened.json
+HARNESS_CASE=2025 uv run python src/texas/screen_harness_recipe.py
+                                                   # -> data/activsg2000_2025_screened.json
 source gridstatus_api_key.sh                        # ERCOT token; see src/grid_data/ercot_auth.py
 uv run python src/texas/fetch_load_snapshots.py --n 8
 uv run python src/texas/build_load_snapshots.py    # -> data/activsg2000_load_collection.json
@@ -124,12 +125,13 @@ uv run python src/texas/build_queue_distribution.py  # -> data/activsg2000_queue
 ```bash
 uv run python src/texas/check_relief_curve_mu.py   # flat vs ORDC relief, emergency-factor regime
 uv run python src/texas/sweep_capped_target.py     # confirm the capped target is a good testbed
-uv run python src/texas/select_relief_set.py       # -> results/activsg2000/relief_set_slim.json
+HARNESS_CASE=2025 uv run python src/texas/select_relief_set.py
+                                                   # -> data/activsg2000_2025_relief_set.json
 ```
 
 ### The full sweep (exhaustive ground truth, ~5.6 h)
 ```bash
-HARNESS_RELIEF_SET=results/activsg2000/relief_set_slim.json HARNESS_THREADS=2 \
+HARNESS_CASE=2025 HARNESS_THREADS=2 \
   uv run python src/texas/enumerate_configs.py --mode full
 # -> results/activsg2000/{mu_cache,snapmax_cache}/  (resumable: existing part pairs are skipped)
 ```
@@ -172,7 +174,7 @@ uv run python src/texas/plot_tail.py                          # plot tail_sample
 **Calibration / selection**
 - `check_relief_curve_mu.py` — flat vs ORDC relief and the emergency-factor regime, all-off diagnostic.
 - `sweep_capped_target.py` — small capped-target sweep confirming `S` is a good combinatorial testbed.
-- `select_relief_set.py` — collect the buses that ever shed under full relief, validate the slim set reproduces `S` on held-out configs → `relief_set_slim.json`. (`identify_relief_set.py` is the earlier timing/certification variant → `relief_set.json`.)
+- `select_relief_set.py` — collect the buses that ever shed under full relief, validate the slim set reproduces `S` on held-out configs → `data/<case>_relief_set.json`. (`identify_relief_set.py` is the earlier timing/certification variant → `relief_set.json`.)
 
 **Sweep and derived datasets**
 - `enumerate_configs.py` — drive configs through the workers; `--mode full` streams `mu_cache` + `snapmax_cache`; subset modes cache `config_cache.parquet`.
@@ -185,6 +187,26 @@ uv run python src/texas/plot_tail.py                          # plot tail_sample
 - `plot_tail.py` — plot the estimated exceedance curve.
 - `time_dcopf.py` — single-solve timing and congestion summary.
 
+## Case inputs (`data/`)
+
+A case is one `CASE_REGISTRY` entry in `sample_harness.py`, selected by `HARNESS_CASE`.
+Every file below is an input: tracked in git, and all a fresh checkout needs to sweep.
+
+| registry key | file | contents |
+|---|---|---|
+| `screened` | `<case>_screened.json` | the SCDCOPF the sweep solves (contingencies filtered to the kept set) |
+| `full` | `<case>.json` (or `activsg2000.json`) | all 2756 contingencies, for `audit()` and for re-screening |
+| `relief` | `<case>_relief_set.json` | the slim relief bus set, loaded by default |
+| — | `<case>_contingencies_screened.json` | provenance: kept names + the recipe they were screened at |
+
+Shared across cases: `activsg2000_queue20.json` (the 20 queue candidates and their
+probabilities) and `activsg2000_load_collection.json` (the 8 load/renewable snapshots).
+
+| case | fleet | contingencies | relief buses |
+|---|---|---|---|
+| `2025` | current (CDR additions through 2025) | 104 | 3 |
+| `original_v12` | original ~2016 | 33 | 9 |
+
 ## Artifacts (`results/activsg2000/`)
 
 | file | produced by | contents |
@@ -196,7 +218,6 @@ uv run python src/texas/plot_tail.py                          # plot tail_sample
 | `tail_samples.parquet` | `score_samplers` | sampler outputs (bits, weights, S) per method/replicate |
 | `tail_guiding_curves.parquet` | `score_samplers` | tidy exceedance curves, estimated vs exact |
 | `tail_sample.npz` | `sample_tail` | live subset-simulation exceedance curve + weighted sample |
-| `relief_set_slim.json` | `select_relief_set` | the 9 relief buses used by the full sweep |
 | `original_case_source/` | — | pre-cap (factor-1.5, uncapped) `mu_cache` + `lmp_cache_old` — the live pinned source for the `activsg2000_original` case (do not delete; distinct setup from the top-level capped/tighter-factor sweep) |
 
 Current sweep: all `2^20 = 1048576` configs, `S ∈ [125, 1531] $/MWh` (median 512, q99 1488),
