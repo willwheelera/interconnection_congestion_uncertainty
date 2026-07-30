@@ -19,16 +19,22 @@
 # Submit:
 #   sbatch src/texas/sweep_vacc.slurm                       # default case (2025)
 #   HARNESS_CASE=original_v12 sbatch --export=ALL src/texas/sweep_vacc.slurm
+#
+# --array splits the config range across independent jobs. Each task keeps the 8-worker
+# snapshot-pinned layout (~3 GB), so this is the way to use more than ~10 cores: run more
+# tasks, not bigger ones. Shards write disjoint parts into one cache directory, so they
+# need no coordination and the derived datasets are rebuilt once after all tasks finish.
 
 #SBATCH --job-name=amps-sweep
 #SBATCH --partition=bluemoon
+#SBATCH --array=0-7
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=8G
 #SBATCH --time=30:00:00
-#SBATCH --output=slurm/%x-%j.out
-#SBATCH --error=slurm/%x-%j.out
+#SBATCH --output=slurm/%x-%A_%a.out
+#SBATCH --error=slurm/%x-%A_%a.out
 #SBATCH --mail-type=END,FAIL
 
 set -euo pipefail
@@ -36,6 +42,12 @@ set -euo pipefail
 # One SCDCOPF worker process per load snapshot; the manager is idle while they solve, so
 # the core budget is split among the workers. Threads are derived from the allocation
 # rather than hardcoded, so changing --cpus-per-task alone re-tunes the job.
+#
+# 10 cores (1 thread/worker) rather than 16 (2 threads/worker): measured, a worker draws
+# ~115% CPU of the 200% two threads allow, because warm-started dual simplex is
+# sequential and extra threads only help through concurrent LP, which a warm start makes
+# pointless. The second thread buys ~15% for double the reservation -- scale with more
+# array shards instead.
 NSNAP=8
 CPUS=${SLURM_CPUS_PER_TASK:-16}
 export HARNESS_THREADS=$(( CPUS / NSNAP < 1 ? 1 : CPUS / NSNAP ))
@@ -52,12 +64,18 @@ mkdir -p slurm
 
 CHAIN=${SWEEP_CHAIN:-1}       # which link of the resubmission chain this job is
 CHAIN_MAX=${SWEEP_CHAIN_MAX:-6}
+
+# Shard count is taken from the array on first submission and then pinned, because a
+# resubmission targets one task (--array=$SHARD) and would otherwise see a count of 1.
+NSHARDS=${SWEEP_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-1}}
+SHARD=${SLURM_ARRAY_TASK_ID:-0}
+
 RESULTS="results/$(uv run python -c "
 import sys; sys.path.insert(0, 'src/texas')
 from sample_harness import RESULTS_NAME; print(RESULTS_NAME)")"
-LOG="$RESULTS/sweep_full.log"
+LOG="$RESULTS/sweep_full.shard${SHARD}of${NSHARDS}.log"
 
-echo "=== amps sweep: case=$HARNESS_CASE chain=$CHAIN/$CHAIN_MAX job=${SLURM_JOB_ID:-none}"
+echo "=== amps sweep: case=$HARNESS_CASE shard=$SHARD/$NSHARDS chain=$CHAIN/$CHAIN_MAX"
 echo "    node=$(hostname)  cpus=$CPUS  threads/worker=$HARNESS_THREADS  results=$RESULTS"
 
 # Fail fast and loudly on licensing: Gurobi is required (the harness builds a
@@ -90,22 +108,24 @@ mkdir -p "$RESULTS"
 # apart from a genuine crash (a crash must not resubmit -- that loops forever).
 set +e
 timeout "${SWEEP_TIMEOUT:-29h}" \
-    uv run python src/texas/enumerate_configs.py --mode full 2>&1 | tee -a "$LOG"
+    uv run python src/texas/enumerate_configs.py --mode full \
+        --shard "$SHARD/$NSHARDS" 2>&1 | tee -a "$LOG"
 rc=${PIPESTATUS[0]}
 set -e
 
-NPARTS=$(ls "$RESULTS/mu_cache" 2>/dev/null | wc -l)
+NPARTS=$(ls "$RESULTS/mu_cache" 2>/dev/null | wc -l)   # all shards, not just this one
 
 if [ "$rc" -eq 0 ] && grep -q "full sweep of" "$LOG"; then
-    echo "=== sweep COMPLETE ($NPARTS chunks)"
-    echo "    next: consolidate_s_cache -> reconstruct_lmp -> score_samplers"
+    echo "=== shard $SHARD COMPLETE ($NPARTS/525 chunks cached across all shards)"
+    echo "    once every shard is done: consolidate_s_cache -> reconstruct_lmp -> score_samplers"
 elif [ "$rc" -ne 124 ]; then
-    echo "=== sweep FAILED (exit $rc) at $NPARTS chunks; not resubmitting"
+    echo "=== shard $SHARD FAILED (exit $rc) at $NPARTS chunks; not resubmitting"
     exit "$rc"
 elif [ "$CHAIN" -ge "$CHAIN_MAX" ]; then
-    echo "=== incomplete after $CHAIN_MAX jobs ($NPARTS chunks); raise SWEEP_CHAIN_MAX"
+    echo "=== shard $SHARD incomplete after $CHAIN_MAX jobs; raise SWEEP_CHAIN_MAX"
     exit 1
 else
-    echo "=== walltime reached at $NPARTS chunks; resubmitting link $(( CHAIN + 1 ))"
-    SWEEP_CHAIN=$(( CHAIN + 1 )) sbatch --export=ALL "$0"
+    echo "=== walltime reached; resubmitting shard $SHARD as link $(( CHAIN + 1 ))"
+    SWEEP_CHAIN=$(( CHAIN + 1 )) SWEEP_SHARDS=$NSHARDS \
+        sbatch --export=ALL --array="$SHARD" "$0"
 fi

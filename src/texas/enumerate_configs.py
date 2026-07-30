@@ -15,10 +15,16 @@ and the cache is written as a parquet keyed by config id. For the random mode it
 prints the direct exceedance curve and, if sample_tail's npz is present, the sampler's
 estimate at matched thresholds.
 
+The full sweep splits across jobs with --shard i/n: shard boundaries fall on CHUNK
+boundaries, so each shard writes exactly the part files an unsharded run would, into the
+same cache directory. Shards are disjoint and can run concurrently on separate nodes, and
+a sharded and unsharded run can resume each other.
+
 Usage:
     uv run python src/texas/enumerate_configs.py --mode random --n 30000
     uv run python src/texas/enumerate_configs.py --mode leq_k --k 5
     uv run python src/texas/enumerate_configs.py --mode full
+    uv run python src/texas/enumerate_configs.py --mode full --shard 3/8
 """
 
 import argparse
@@ -75,7 +81,21 @@ def solve_all(target, bits, powers):
     return df.set_index("id")
 
 
-def solve_full_mu(target, bits, powers):
+def shard_bounds(n_configs, shard, n_shards):
+    """Contiguous [lo, hi) config range for one shard, aligned to CHUNK boundaries.
+
+    Splitting by whole chunks (rather than evenly by config) makes every shard write
+    exactly the part files a single unsharded run would write, so sharded and unsharded
+    runs are interchangeable: either can resume the other's output, and no two shards
+    can name the same part.
+    """
+    n_chunks = -(-n_configs // CHUNK)
+    lo = shard * n_chunks // n_shards
+    hi = (shard + 1) * n_chunks // n_shards
+    return lo * CHUNK, min(hi * CHUNK, n_configs)
+
+
+def solve_full_mu(target, bits, powers, offset=0):
     """Solve every config and stream its full load-averaged mu vector to parquet parts.
 
     Writes one part file per CHUNK of configs in long format (id, n_on, constraint, mu),
@@ -87,13 +107,17 @@ def solve_full_mu(target, bits, powers):
     fallback shed: a large overload or nonzero shed flags a config the slimmed relief set
     could not fully serve, to recheck under full relief. A part pair that already exists
     is skipped, so the sweep resumes after an interruption.
+
+    offset is this shard's position in the global config order; part files are named by
+    the global index so shards write into one shared cache directory.
     """
     MU_DIR.mkdir(parents=True, exist_ok=True)
     SNAPMAX_DIR.mkdir(parents=True, exist_ok=True)
     n = len(bits)
     for start in range(0, n, CHUNK):
-        part = MU_DIR / f"part_{start:08d}.parquet"
-        snap_part = SNAPMAX_DIR / f"part_{start:08d}.parquet"
+        gstart = offset + start
+        part = MU_DIR / f"part_{gstart:08d}.parquet"
+        snap_part = SNAPMAX_DIR / f"part_{gstart:08d}.parquet"
         if part.exists() and snap_part.exists():
             print(f"  skip {start}/{n} (exists)", flush=True)
             continue
@@ -139,7 +163,14 @@ def main():
     parser.add_argument("--n", type=int, default=30000, help="draws for --mode random")
     parser.add_argument("--k", type=int, default=5, help="max gens on for --mode leq_k")
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--shard", default="0/1",
+                        help="i/n: solve only shard i of n (--mode full); shards write "
+                             "disjoint parts into one cache, so run them concurrently")
     args = parser.parse_args()
+
+    shard, n_shards = (int(v) for v in args.shard.split("/"))
+    assert 0 <= shard < n_shards, f"--shard {args.shard}: need 0 <= i < n"
+    assert n_shards == 1 or args.mode == "full", "--shard only applies to --mode full"
 
     target = ParallelTarget()
     ngen = len(target.candidates)
@@ -153,9 +184,12 @@ def main():
         print(f"mode={args.mode}  unique configs={len(bits)}  ngen={ngen}", flush=True)
         t0 = time.time()
         if args.mode == "full":
-            solve_full_mu(target, bits, powers)
-            print(f"\nfull sweep of {len(bits)} configs in {time.time() - t0:.0f}s "
-                  f"-> {MU_DIR}", flush=True)
+            lo, hi = shard_bounds(len(bits), shard, n_shards)
+            print(f"shard {shard}/{n_shards}: configs [{lo}, {hi}) "
+                  f"= {-(-(hi - lo) // CHUNK)} chunks", flush=True)
+            solve_full_mu(target, bits[lo:hi], powers, offset=lo)
+            print(f"\nfull sweep of {hi - lo} configs (shard {shard}/{n_shards}) in "
+                  f"{time.time() - t0:.0f}s -> {MU_DIR}", flush=True)
         else:
             df = solve_all(target, bits, powers)
             dt = time.time() - t0

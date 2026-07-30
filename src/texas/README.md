@@ -138,13 +138,18 @@ HARNESS_CASE=2025 HARNESS_THREADS=2 \
 Subset modes for sanity checks (no full enumeration): `--mode random --n 30000`,
 `--mode leq_k --k 5`.
 
-On a cluster (UVM VACC), `sbatch src/texas/sweep_vacc.slurm`. The job derives
-`HARNESS_THREADS` from `--cpus-per-task`, stops itself just before the walltime, and
-resubmits so the next link resumes from the parts already written. Measured footprint on
-the 104-contingency 2025 case: ~2.8 GB resident (8 workers + manager), ~180 s per 2000-config
-chunk at 2 threads/worker. **Gurobi licensing is the blocker to settle first** — the harness
-has no non-Gurobi path, and a node-locked workstation license will not validate on a compute
-node.
+`--shard i/n` solves only shard `i`, on CHUNK-aligned contiguous boundaries, so shards write
+disjoint part files into one cache and produce exactly what an unsharded run would. Shards
+need no coordination and either kind of run can resume the other.
+
+On a cluster (UVM VACC), `sbatch src/texas/sweep_vacc.slurm` — an `--array` job, one shard
+per task, which stops itself just before the walltime and resubmits its own shard to resume.
+Sharding is the way to scale: parallelism inside one task is capped at the 8 snapshot
+workers, and each worker draws only ~115% CPU (warm-started dual simplex is sequential, so
+extra Gurobi threads buy little), so more tasks beat bigger tasks. Measured on the
+104-contingency 2025 case: ~2.9 GB resident and ~180 s per 2000-config chunk.
+**Gurobi licensing is the blocker to settle first** — the harness has no non-Gurobi path,
+and a node-locked workstation license will not validate on a compute node.
 
 ### Rebuild the derived datasets (fast; run in this order after any sweep)
 ```bash
