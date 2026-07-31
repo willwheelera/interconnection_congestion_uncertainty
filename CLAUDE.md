@@ -18,7 +18,7 @@ The gridstatusio source is installed at .venv/lib/python3.14/site-packages/grids
 
 ## Project Structure
 
-This is a research project focused on electricity market optimization and analysis.
+This is a research project focused on price uncertainty in the wholesale electricity market.
 
 ### Research Goal
 
@@ -34,6 +34,11 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - Do not plan for every possible case. If arguments do not conform to expectations, allow the program to error out instead of providing backup options. This makes code more direct, concise, and readable.
 - Never ask for interactive inputs in python scripts
 - If a python file has a main() function, it should be concise and contain exclusively organizational logic of the program. All specific tasks, such as plot formatting, should be implemented in other functions dedicated to those purposes.
+- plotting files should contain `plt.show()`
+- For loops are preferred over while loops. Especially avoid `while True:` construction.
+
+### Plot design
+- Figures should have 3-inch width to fit in a single column of a two-column document. Wider figures (e.g., more than three panels wide) should be at most 6 inches wide to fit within margins.
 
 ### Code Execution Rules
 - **Temporary Snippets**: When running code via `python3 -c`, `bash -c`, or similar inline execution commands, **NEVER include comments**. 
@@ -73,3 +78,22 @@ EGRET (`.venv/lib/python3.14/site-packages/egret/`) provides:
 - **Ipopt** is required for NLP problems (ACOPF, AC relaxations).
 - Commercial solvers (Gurobi, CPLEX) enable the full EGRET test suite.
 
+## Language and phrases
+
+These words and phrases are overused and should be avoided:
+- caveat
+- say the word
+- smoke-test
+- honest
+- worth flagging
+- things worth flagging
+- flag
+- gotcha
+
+Confusing words to avoid:
+- adder
+
+## Allowed commands
+Sometimes Claude needs permission to run a command. These commands are always allowed:
+- `source gridstatus_api_key.sh`
+- `$((SECONDS+520))`
