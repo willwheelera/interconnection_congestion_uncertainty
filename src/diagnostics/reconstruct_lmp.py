@@ -116,10 +116,14 @@ def main():
     M = load_mu_matrix(case, constraints)
     rng, std, mab = lmp_spread_stats(M, P)
 
-    s = pd.read_parquet(case.results_dir / "S_cache.parquet")
-    df = s.assign(lmp_range=rng, lmp_std=std, lmp_maxabs=mab)
-    df.to_parquet(out)
-    report(df)
+    # The LMP columns are all this file can produce; max_mu / driver come from the
+    # target_cache, and are joined here only for the report, not written back.
+    lmp = pd.DataFrame({"lmp_range": rng, "lmp_std": std, "lmp_maxabs": mab},
+                       index=np.arange(len(rng)))
+    lmp.index.name = "id"
+    lmp.to_parquet(out)
+    tgt = pd.read_parquet(case.target_cache, columns=["max_mu", "n_on", "driver"])
+    report(lmp.join(tgt).rename(columns={"max_mu": "S"}))
     print(f"\nsaved -> {out}")
 
 

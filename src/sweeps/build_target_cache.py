@@ -12,10 +12,17 @@ functions as columns, and n_on.  Two enumerations feed this:
     from snapmax_cache, both of which only the Texas sweeps carry.
 
 Every case emits the same columns so the runner can swap cases by name alone:
-    max_mu, sum_mu, one_mu, one_lmp, n_on, max_mu_single
+    max_mu, sum_mu, one_mu, one_lmp, n_on, max_mu_single, driver
 where one_lmp is NaN when a case has no cached LMP and max_mu_single is NaN when a
 case has no per-snapshot enumeration.  The chosen line/bus/snapshot are recorded in
 the file metadata.
+
+`driver` names the element attaining max_mu.  It is here rather than in a separate
+scalar cache because the Texas cases used to carry the same per-configuration reduction
+three times over -- an `S_cache` (n_on, S, driver, driver_mu, where S and driver_mu were
+the same column), a partial `config_cache` with that schema, and an `lmp_cache` that
+repeated all four and added the LMP spread.  All of it is one groupby over mu_cache, so
+it lives here now and `lmp_cache` keeps only the LMP columns it alone can produce.
 
 Which ingest a case takes, where its raw caches are, and which element is its `one_mu`
 all come off its registry record -- this file holds no case table of its own.
@@ -36,7 +43,7 @@ import pandas as pd
 from cases import registry
 from sampling.problem import write_parquet_meta
 
-COLUMNS = ["max_mu", "sum_mu", "one_mu", "one_lmp", "n_on", "max_mu_single"]
+COLUMNS = ["max_mu", "sum_mu", "one_mu", "one_lmp", "n_on", "max_mu_single", "driver"]
 
 
 def popcount(ids, ngen):
@@ -57,19 +64,26 @@ def build_wide(dual_path, one_mu=None):
     out["one_mu"], out["one_lmp"] = mu[one_mu_col], lmp[one_lmp_col]
     out["n_on"] = popcount(df.index.values, ngen)
     out["max_mu_single"] = np.nan                        # no per-snapshot enumeration
+    out["driver"] = mu.idxmax(axis=1)                    # the element attaining max_mu
     meta = dict(kind="wide", one_mu_element=str(one_mu_col), one_lmp_element=str(one_lmp_col))
     return out[COLUMNS], meta
 
 
 def reduce_mu_cache(mu_dir):
-    """One pass over the long mu_cache: per-id max/sum/n_on and per-constraint global max."""
+    """One pass over the long mu_cache: per-id max/sum/n_on/driver and per-constraint max.
+
+    `driver` is the constraint attaining that configuration's max mu.  All of a
+    configuration's duals live in one part file (parts are chunked by configuration), so
+    the per-id argmax is exact within a part and needs no cross-part merge.
+    """
     parts = sorted(glob.glob(str(Path(mu_dir) / "part_*.parquet")))
     per_id, cmax = [], defaultdict(float)
     for part in parts:
         d = pd.read_parquet(part)
+        top = d.loc[d.groupby("id")["mu"].idxmax()].set_index("id")["constraint"]
         g = d.groupby("id")
         per_id.append(pd.DataFrame({"max_mu": g["mu"].max(), "sum_mu": g["mu"].sum(),
-                                    "n_on": g["n_on"].first()}))
+                                    "n_on": g["n_on"].first(), "driver": top}))
         for c, v in d.groupby("constraint")["mu"].max().items():
             cmax[c] = max(cmax[c], v)
     reduced = pd.concat(per_id).sort_index()
@@ -85,9 +99,20 @@ def extract_constraint(parts, constraint, index):
 
 
 def single_snapshot_peak(snapmax_dir):
-    """Peak mu per config for one chosen snapshot, from snapmax_cache; (series, snapshot)."""
+    """Peak mu per config for one chosen snapshot, from snapmax_cache; (series, snapshot).
+
+    Returns (None, None) for a single-load-level case, whose snapmax rows carry a null
+    snapshot: there the single-hour peak is the averaged peak, so `max_mu_single` would
+    just repeat `max_mu`.  Also (None, None) for a sweep written before the snapmax
+    schema was unified, whose parts have no snapshot or max_mu column at all.
+    """
     parts = sorted(glob.glob(str(Path(snapmax_dir) / "*.parquet")))
-    snap = sorted(pd.read_parquet(parts[0])["snapshot"].unique())[0]
+    if not parts:
+        return None, None
+    head = pd.read_parquet(parts[0])
+    if "snapshot" not in head or "max_mu" not in head or head["snapshot"].isna().all():
+        return None, None
+    snap = sorted(head["snapshot"].dropna().unique())[0]
     rows = [pd.read_parquet(p).query("snapshot == @snap").set_index("id")["max_mu"] for p in parts]
     return pd.concat(rows).sort_index(), snap
 
@@ -101,13 +126,9 @@ def build_long(mu_dir, lmp, snapmax, one_mu=None):
     out["one_mu"] = extract_constraint(parts, driver, reduced.index)
     out["one_lmp"] = (pd.read_parquet(lmp)["lmp_maxabs"].reindex(reduced.index)
                       if lmp else np.nan)
-    out["n_on"] = reduced["n_on"]
-    snap = None
-    if snapmax:
-        peak, snap = single_snapshot_peak(snapmax)
-        out["max_mu_single"] = peak.reindex(reduced.index)
-    else:
-        out["max_mu_single"] = np.nan
+    out["n_on"], out["driver"] = reduced["n_on"], reduced["driver"]
+    peak, snap = single_snapshot_peak(snapmax) if snapmax else (None, None)
+    out["max_mu_single"] = peak.reindex(reduced.index) if peak is not None else np.nan
     meta = dict(kind="long", one_mu_element=str(driver),
                 one_lmp_element="lmp_maxabs" if lmp else None, snapshot=snap)
     return out[COLUMNS], meta

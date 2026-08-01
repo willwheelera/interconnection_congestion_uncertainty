@@ -18,14 +18,16 @@ Output, identical for both case families so `sweeps.build_target_cache` and
     <out>/mu_cache/part_XXXXXXXX.parquet     id, n_on, constraint, mu   (one row per
         binding dual; a configuration where nothing binds gets one mu = 0 sentinel row)
 
-plus the secondary cache that records what the recipe's relief mechanisms had to buy,
-whose shape follows the case's parallel axis:
+plus the secondary cache that records what the recipe's relief mechanisms had to buy, in
+one schema whatever the parallel axis:
 
-    <out>/snapmax_cache/  (snapshot-parallel)  id, n_on, snapshot, max_mu, max_line,
-        max_overload_mw, overload_line, load_shed_mw -- the single-hour peak mu before
-        averaging, which is what compares against real per-hour shadow prices
-    <out>/stress_cache/   (config-parallel)    id, n_on, max_overload_mw, overload_line,
-        load_shed_mw
+    <out>/snapmax_cache/part_XXXXXXXX.parquet   id, n_on, snapshot, max_mu, max_line,
+        max_overload_mw, overload_line, load_shed_mw
+
+For a snapshot-parallel case there is one row per (configuration, snapshot), holding that
+single hour's peak mu *before* averaging -- the quantity that compares against real
+per-hour shadow prices.  A single-load-level case has one row per configuration with
+`snapshot` null.
 
 A large overload or a nonzero shed marks a configuration the shadow-price cap or the
 slimmed relief set could not fully serve.  Configuration ids are MSB-first over the
@@ -58,7 +60,6 @@ CHUNK = 2000            # configurations dispatched to the workers per part file
 MU_COLUMNS = ["id", "n_on", "constraint", "mu"]
 SNAPMAX_COLUMNS = ["id", "n_on", "snapshot", "max_mu", "max_line",
                    "max_overload_mw", "overload_line", "load_shed_mw"]
-STRESS_COLUMNS = ["id", "n_on", "max_overload_mw", "overload_line", "load_shed_mw"]
 
 
 def powers(ngen):
@@ -109,14 +110,18 @@ def snapshot_rows(chunk, results, pw):
 
 
 def config_rows(chunk, results, pw):
-    """(long dual rows, stress rows) for one chunk from a config-parallel evaluator."""
+    """(long dual rows, snapmax rows) for one chunk from a config-parallel evaluator.
+
+    Same snapmax schema as the snapshot-parallel path, with `snapshot` null: a
+    single-load-level case has exactly one implicit snapshot."""
     rows, aux = [], []
     for cfg, (mus, overload, shed) in zip(chunk, results):
         cid, n_on = int(cfg @ pw), int(cfg.sum())
         for con, mu in (mus or {"none": 0.0}).items():
             rows.append((cid, n_on, con, mu))
+        con, mu = max(mus.items(), key=lambda kv: kv[1], default=("none", 0.0))
         line, mw = max(overload.items(), key=lambda kv: kv[1], default=("none", 0.0))
-        aux.append((cid, n_on, mw, line, shed))
+        aux.append((cid, n_on, None, mu, con, mw, line, shed))
     return rows, aux
 
 
@@ -126,12 +131,9 @@ def sweep(case, target, bits, out_dir, offset=0):
     `offset` is this shard's position in the global configuration order; parts are named
     by the global index so shards share one cache directory.
     """
-    snapshotwise = case.parallel == "snapshot"
-    aux_name = "snapmax_cache" if snapshotwise else "stress_cache"
-    aux_columns = SNAPMAX_COLUMNS if snapshotwise else STRESS_COLUMNS
-    make_rows = snapshot_rows if snapshotwise else config_rows
-
-    mu_dir, aux_dir = out_dir / "mu_cache", out_dir / aux_name
+    make_rows = snapshot_rows if case.parallel == "snapshot" else config_rows
+    aux_columns = SNAPMAX_COLUMNS
+    mu_dir, aux_dir = out_dir / "mu_cache", out_dir / "snapmax_cache"
     mu_dir.mkdir(parents=True, exist_ok=True)
     aux_dir.mkdir(parents=True, exist_ok=True)
 

@@ -96,15 +96,38 @@ data/<case>_screened.json                 contingency set filtered to the binder
 data/<case>_candidates.json               queue candidates and their build probabilities
 data/<case>_relief_set.json               slim ORDC relief buses            (optional)
 
-results/<case>/mu_cache/part_*.parquet    long: id, n_on, constraint, mu
-results/<case>/snapmax_cache/  or  stress_cache/    what the relief mechanisms bought
-results/<case>/dual_cache.parquet         wide: id x {mu, flow, p_gen, lmp}
-results/<case>/target_cache.parquet       common: max_mu sum_mu one_mu one_lmp n_on ...
-results/<case>/experiment_{samples,curves}/b<budget>.parquet
-results/<case>/static_descriptors_<base>.parquet
+results/<case>/
+  mu_cache/part_*.parquet       long   id, n_on, constraint, mu          [the raw sweep]
+  snapmax_cache/part_*.parquet  long   id, n_on, snapshot, max_mu, max_line,
+                                       max_overload_mw, overload_line, load_shed_mw
+  dual_cache.parquet            wide   id x (group, element), `mu` group always present
+  target_cache.parquet          wide   max_mu sum_mu one_mu one_lmp n_on
+                                       max_mu_single driver
+  lmp_cache.parquet             wide   lmp_range lmp_std lmp_maxabs      (optional)
+  static_descriptors_<base>.parquet
+  experiment_{samples,curves}/b<budget>.parquet
 ```
 
-Configuration ids are MSB-first over the candidate order in the queue file, everywhere.
+Configuration ids are MSB-first over the candidate order in the queue file, everywhere,
+and every per-configuration frame is indexed by `id`.
+
+Two conventions worth knowing:
+
+- **`dual_cache` carries `mu` always and other groups optionally.** The gen-per-bus sweeps
+  recorded the whole solution, so theirs also has `flow`, `p_gen`, `lmp`, `va`, `nu`,
+  `load`, `mu_pmax`, `mu_pmin`; the security-constrained sweeps keep only `mu`.
+  `Case.dual_cache_groups()` reports which a case has, and `descriptors/compute.py`
+  branches on that rather than on the case family.
+- **`snapmax_cache` has one schema for both parallel axes.** A snapshot-parallel case has
+  one row per (configuration, snapshot) holding that hour's peak mu *before* averaging; a
+  single-load-level case has one row per configuration with `snapshot` null.
+
+Everything except `mu_cache` is derived and rebuildable. Earlier layouts had the Texas
+cases carrying the same reduction three times — an `S_cache` (whose `S` and `driver_mu`
+were the same column), a partial `config_cache` with that schema, and an `lmp_cache` that
+repeated all four and added the LMP spread — plus `activsg2000_original`'s caches under
+`results/activsg2000/original_case_source/`. That is all folded into `target_cache` and the
+standard per-case directory now.
 
 ## Package notes
 

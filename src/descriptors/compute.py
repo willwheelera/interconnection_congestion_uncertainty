@@ -4,9 +4,9 @@ These are the cheap single-configuration predictors Claim 2 tests: if sampling i
 replaceable, they should rank the lines the sampled tail ranks.  `descriptors.study`
 scores them; this file produces them.
 
-Two sources, chosen by case family.  A `wide` case (the gen-per-bus testbeds) already has
-per-line flows and dispatch in its dual_cache, so the descriptors read straight out of the
-all-on row.  A security-constrained case stores only mu, and its constraints are N-1 pairs
+Two sources, chosen by what the case's dual_cache actually carries.  A cache with `flow`
+and `p_gen` groups (the gen-per-bus testbeds recorded the full solution) already has
+everything, so the descriptors read straight out of the all-on row.  A security-constrained case stores only mu, and its constraints are N-1 pairs
 ("base:{line}" or "ctg:{outage}:{line}") rather than plain lines, so this rebuilds the same
 two descriptors from ONE SCDCOPF solve per load snapshot at a chosen base configuration,
 through `model.scdcopf` so the recipe (emergency factor, ORDC relief, soft caps) matches
@@ -186,11 +186,11 @@ def build_wide(case):
 def descriptors(case, base="off"):
     """The case's per-constraint descriptors, by whichever source its model calls for.
 
-    A wide case is read straight out of its enumerated dual_cache, which is cheap.  A
-    security-constrained case costs one SCDCOPF solve per snapshot, so it is read from the
-    cache this module's `main` writes and errors rather than silently launching that job.
+    A dual_cache carrying `flow` and `p_gen` is read straight out, which is cheap.  Anything
+    else costs one SCDCOPF solve per snapshot, so it is read from the cache this module's
+    `main` writes and errors rather than silently launching that job.
     """
-    if case.model == "dcopf":
+    if {"flow", "p_gen"} <= case.dual_cache_groups():
         return build_wide(case)
     cached = case.descriptor_cache(base)
     if not cached.exists():
@@ -206,7 +206,7 @@ def main():
     parser.add_argument("--base", default="off", choices=BASES)
     args = parser.parse_args()
     case = registry.get(args.case)
-    if case.model == "dcopf":
+    if {"flow", "p_gen"} <= case.dual_cache_groups():
         d = build_wide(case)
     else:
         constraints = list(pd.read_parquet(case.dual_cache)["mu"].columns)

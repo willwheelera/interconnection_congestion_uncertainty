@@ -129,32 +129,55 @@ class Case:
         return self.paths.get("mu_cache", self.results_dir / "mu_cache")
 
     @property
-    def snapmax_cache(self) -> Path | None:
-        """Per-snapshot peak mu, overload, and shed; snapshot-parallel cases only."""
-        if self.parallel != "snapshot":
-            return None
-        return self.paths.get("snapmax", self.results_dir / "snapmax_cache")
+    def snapmax_cache(self) -> Path:
+        """Per (config, snapshot): peak mu, and the overload and shed relief had to buy.
 
-    @property
-    def stress_cache(self) -> Path | None:
-        """Per-config overload and shed; the config-parallel cases' snapmax equivalent."""
-        if self.parallel != "config":
-            return None
-        return self.results_dir / "stress_cache"
+        Written by every sweep, in one schema.  A single-load-level case has one row per
+        configuration with `snapshot` null; a snapshot-parallel case has one row per
+        (configuration, snapshot).
+        """
+        return self.results_dir / "snapmax_cache"
 
     @property
     def lmp_cache(self) -> Path | None:
-        p = self.paths.get("lmp", self.results_dir / "lmp_cache.parquet")
-        return p if p and Path(p).exists() else None
+        """Congestion-LMP spread per configuration; only where reconstruct_lmp has run."""
+        p = self.results_dir / "lmp_cache.parquet"
+        return p if p.exists() else None
 
     @property
     def dual_cache(self) -> Path:
-        """Wide per-config duals; the sampling Problem reads this."""
+        """Wide per-element duals, indexed by configuration id.
+
+        Column groups are a 2-level MultiIndex.  The `mu` group is always present -- it is
+        what `sampling.problem.Problem.mu_table` reads.  A sweep that recorded the full
+        solution adds more (`flow`, `p_gen`, `lmp`, `va`, `nu`, `load`, `mu_pmax`,
+        `mu_pmin`); `dual_cache_groups()` reports which a case actually has.
+        """
         return self.results_dir / "dual_cache.parquet"
+
+    def dual_cache_groups(self) -> set:
+        """The column groups this case's dual_cache carries (empty if it has none).
+
+        A pandas MultiIndex is flattened to "('group', 'name')" strings in the parquet
+        schema, so the group is the first element of each parsed tuple.
+        """
+        import ast
+        import pyarrow.parquet as pq
+        if not self.dual_cache.exists():
+            return set()
+        groups = set()
+        for name in pq.read_schema(self.dual_cache).names:
+            if name.startswith("("):
+                groups.add(ast.literal_eval(name)[0])
+        return groups
 
     @property
     def target_cache(self) -> Path:
-        """The common per-config target frame every case is reduced to."""
+        """The common per-config frame every case is reduced to.
+
+        Columns: max_mu, sum_mu, one_mu, one_lmp, n_on, max_mu_single, driver.  `driver`
+        names the constraint attaining max_mu, which is why there is no separate S cache.
+        """
         return self.results_dir / "target_cache.parquet"
 
     def descriptor_cache(self, base="off") -> Path:
@@ -254,9 +277,7 @@ CASES: dict[str, Case] = {
     "activsg2000_original": _texas(
         "activsg2000_original", "base:9", DATA / "activsg2000.json",
         screened=DATA / "activsg2000_screened.json",
-        contingencies=DATA / "activsg2000_contingencies_screened.json",
-        mu_cache=RESULTS / "activsg2000" / "original_case_source" / "mu_cache",
-        lmp=RESULTS / "activsg2000" / "original_case_source" / "lmp_cache_old.parquet"),
+        contingencies=DATA / "activsg2000_contingencies_screened.json"),
     "activsg2000_2025": _texas(
         "activsg2000_2025", "ctg:464:461", DATA / "activsg2000_2025.json"),
     "activsg2000_original_v12": _texas(

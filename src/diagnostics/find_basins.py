@@ -4,29 +4,29 @@ Greedy steepest-neighbor hill climb: each config maps to its best single-bit-fli
 neighbor (or itself). Following that map to a fixed point assigns every config to a
 local maximum of S. Reports how many basins exist, their sizes, and their peaks.
 
-Runs on the full ACTIVSg2000 sweep results/activsg2000/S_cache.parquet (queue of 20
-gens, one scalar S per config).
+Needs a fully enumerated case: every configuration id from 0 to 2^ngen - 1 present in the
+target cache, since the hill climb indexes neighbors by id arithmetic.
 
 Usage:
-    uv run python src/find_basins.py
+    uv run python -m diagnostics.find_basins --case activsg2000_2025
 """
+
+import argparse
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
 
-from paths import REPO_ROOT
-CASE_DIR = REPO_ROOT / "results" / "activsg2000"
+from cases import registry
 
 
 def load_target(path):
-    """Load S_cache as arrays indexed by config id (requires a full contiguous sweep)."""
-    df = pd.read_parquet(path).sort_index()
+    """Load max_mu as arrays indexed by config id (requires a full contiguous sweep)."""
+    df = pd.read_parquet(path, columns=["max_mu", "n_on"]).sort_index()
     n = int(round(np.log2(len(df))))
     assert len(df) == 1 << n and df.index[0] == 0 and df.index[-1] == len(df) - 1
-    return df["S"].to_numpy(), df["n_on"].to_numpy(), n
+    return df["max_mu"].to_numpy(), df["n_on"].to_numpy(), n
 
 
 def steepest_neighbor(S, n):
@@ -73,7 +73,10 @@ def plot_basins(stats, out):
 
 
 def main():
-    S, n_on, n = load_target(CASE_DIR / "S_cache.parquet")
+    parser = argparse.ArgumentParser()
+    registry.add_case_arg(parser)
+    case = registry.get(parser.parse_args().case)
+    S, n_on, n = load_target(case.target_cache)
     ascent = steepest_neighbor(S, n)
     basin = basins_of(ascent)
     stats = basin_stats(S, n_on, basin)
@@ -81,7 +84,7 @@ def main():
     print(f"global max S {stats.peak_S.iloc[0]:.1f} at config {stats.index[0]} "
           f"(n_on={stats.n_on.iloc[0]}, basin size {int(np.exp(stats.log_count.iloc[0]))})")
     print(stats.head(10).to_string())
-    plot_basins(stats, CASE_DIR / "basin_stats.pdf")
+    plot_basins(stats, case.results_dir / "basin_stats.pdf")
 
 
 if __name__ == "__main__":

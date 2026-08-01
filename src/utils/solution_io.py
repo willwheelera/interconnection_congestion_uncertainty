@@ -113,7 +113,7 @@ def load_dual_cache(cache: Path, scan="availability") -> pd.DataFrame:
     df = pd.read_parquet(cache)
     df = df.sort_index()
 
-    name = "load_scale" if scan == "load" else "avail_id"
+    name = "load_scale" if scan == "load" else "id"
     df.index.name = name
     return df
 
@@ -146,7 +146,7 @@ def load_all_duals(cache_path, scan="availability", max_workers=None) -> pd.Data
                 print(f"{i+1}/{len(paths)}  {time.perf_counter()-t0:.2f}", flush=True)
         #list(ex.map(f, paths))
 
-    name = "load_scale" if scan == "load" else "avail_id"
+    name = "load_scale" if scan == "load" else "id"
     df = pd.DataFrame(blocks)
     df.set_index("row_id", inplace=True)
     df.index.name = name
