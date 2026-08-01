@@ -29,3 +29,6 @@ Egret/
 
 # Slurm job logs
 slurm/
+
+# Fetched ERCOT datasets: re-downloadable via src/ercot/fetch_ercot.py
+data/ercot/
