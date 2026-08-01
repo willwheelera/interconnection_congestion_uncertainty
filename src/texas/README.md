@@ -97,7 +97,10 @@ start). With 8 workers on 20 cores, set `HARNESS_THREADS` to avoid oversubscript
         ▼   (derived datasets — rebuilt with consolidate/reconstruct/score below)
    consolidate_s_cache ─► S_cache.parquet          (id → n_on, S, driver, driver_mu)
    reconstruct_lmp     ─► lmp_cache.parquet         (S_cache + mu_cache → PTDF congestion-LMP spread)
-   score_samplers      ─► tail_samples.parquet, tail_guiding_curves.parquet  (samplers vs exact S)
+        │
+        ▼   (scoring moved to the shared runner, which handles all four testbeds)
+   tail_sampling.build_target_cache ─► target_cache.parquet   (common per-config target columns)
+   tail_sampling.run_experiments    ─► experiment_curves/, experiment_samples/
 
   (independent live-solve path — the method for cases too large to enumerate)
    sample_tail ─► tail_sample.npz  ──plot_tail──►  tail plot
@@ -153,12 +156,17 @@ and a node-locked workstation license will not validate on a compute node.
 
 ### Rebuild the derived datasets (fast; run in this order after any sweep)
 ```bash
-uv run python -m texas.consolidate_s_cache   # mu_cache      -> S_cache.parquet
-uv run python -m texas.reconstruct_lmp       # mu_cache + S  -> lmp_cache.parquet
-uv run python -m texas.score_samplers        # S_cache       -> tail_samples.parquet, tail_guiding_curves.parquet
+HARNESS_CASE=2025 uv run python -m texas.consolidate_s_cache  # mu_cache     -> S_cache.parquet
+HARNESS_CASE=2025 uv run python -m texas.reconstruct_lmp      # mu_cache + S -> lmp_cache.parquet
+uv run python -m tail_sampling.build_target_cache --case activsg2000_2025
+uv run python -m tail_sampling.run_experiments    --case activsg2000_2025
 ```
-`consolidate_s_cache` and `score_samplers` are pure table work (seconds/minutes);
-`reconstruct_lmp` factorizes the PTDF once (a few minutes).
+All three paths follow `HARNESS_CASE` through `sample_harness.RESULTS_NAME`, so the same
+commands rebuild any registered case. `consolidate_s_cache` and the sampler runner are
+pure table work (seconds/minutes); `reconstruct_lmp` factorizes the PTDF once (a few
+minutes). `score_samplers.py` is the superseded Texas-only version of the last two steps
+and no longer imports (`tail_sampling.compare_methods`/`evaluate` were replaced by
+`run_experiments`).
 
 ### Rare-event sampling by live solves
 This is the actual research method for the regime where `2^20` is too large to enumerate;
@@ -193,7 +201,7 @@ uv run python src/texas/plot_tail.py                          # plot tail_sample
 - `enumerate_configs.py` — drive configs through the workers; `--mode full` streams `mu_cache` + `snapmax_cache`; subset modes cache `config_cache.parquet`.
 - `consolidate_s_cache.py` — reduce `mu_cache` to `S_cache.parquet` (peak load-averaged μ per config + its driving constraint).
 - `reconstruct_lmp.py` — project the cached μ through the PTDF/LODF to per-config congestion-LMP spread → `lmp_cache.parquet` (no new solves).
-- `score_samplers.py` — run the reusable `tail_sampling/` samplers as table lookups against the exact `S_cache` and score their tail estimates → `tail_samples.parquet`, `tail_guiding_curves.parquet`.
+- `score_samplers.py` — **superseded and broken**: the Texas-only sampler scorer, replaced by `tail_sampling.build_target_cache` + `tail_sampling.run_experiments`, which cover all four testbeds from one common target cache.
 
 **Live sampling and utilities**
 - `sample_tail.py` — subset-simulation tail estimate by live solves → `tail_sample.npz`.
@@ -228,11 +236,15 @@ probabilities) and `activsg2000_load_collection.json` (the 8 load/renewable snap
 | `snapmax_cache/` | same | per (config, snapshot) peak μ + line, worst overload MW, load shed MW (the missing-relief safety net) |
 | `S_cache.parquet` | `consolidate_s_cache` | per config: `S`, `driver` constraint, `driver_mu`, `n_on` |
 | `lmp_cache.parquet` | `reconstruct_lmp` | `S_cache` + congestion-LMP spread (`lmp_range`, `lmp_std`, `lmp_maxabs`) |
-| `tail_samples.parquet` | `score_samplers` | sampler outputs (bits, weights, S) per method/replicate |
-| `tail_guiding_curves.parquet` | `score_samplers` | tidy exceedance curves, estimated vs exact |
+| `target_cache.parquet` | `tail_sampling.build_target_cache` | common per-config target columns (`max_mu`, `sum_mu`, `one_mu`, `one_lmp`, `n_on`, `max_mu_single`) |
+| `experiment_samples/`, `experiment_curves/` | `tail_sampling.run_experiments` | per-budget shards: sampler draws and tidy exceedance curves, estimated vs exact |
 | `tail_sample.npz` | `sample_tail` | live subset-simulation exceedance curve + weighted sample |
 | `original_case_source/` | — | pre-cap (factor-1.5, uncapped) `mu_cache` + `lmp_cache_old` — the live pinned source for the `activsg2000_original` case (do not delete; distinct setup from the top-level capped/tighter-factor sweep) |
 
-Current sweep: all `2^20 = 1048576` configs, `S ∈ [125, 1531] $/MWh` (median 512, q99 1488),
-0 at the cap; drivers `ctg:68:18` (3/4 of configs) and `ctg:329:330` (1/4).
+Current sweep (`activsg2000_2025`, 2026-07-31): all `2^20 = 1048576` configs in 26.2 h,
+`S ∈ [221.6, 279.7] $/MWh` (median 252.6, q99 279.4), 0 at the cap, max overload 5.64 MW,
+no config shed. `ctg:464:461` drives every config but one (all-off, `ctg:768:777` at
+275.0). The target is nearly flat: nominal-weighted quantiles run 275.3 (median) → 279.6
+(p = 1e-5), a 1.6 % spread over five decades of rarity, so this case has no rare-event
+structure to sample — see the note in `notes/`.
 

@@ -14,7 +14,7 @@ uniform per-bus offset (it cancels out of any spatial spread) and is not in the 
 cache. All spread statistics (range, std, max abs) are invariant to it.
 
 Usage:
-    uv run python -m texas.reconstruct_lmp
+    HARNESS_CASE=2025 uv run python -m texas.reconstruct_lmp
 """
 
 import glob
@@ -30,10 +30,10 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "src" / "texas"))
 
 from sample_harness import build_audit_ptdf          # full-contingency VirtualPTDFMatrix
+from sample_harness import FULL_CASE, RESULTS_NAME   # topology + results dir of HARNESS_CASE
 from egret.data.model_data import ModelData
 
-RESULTS = REPO / "results" / "activsg2000"
-FULL_CASE = REPO / "data" / "activsg2000.json"
+RESULTS = REPO / "results" / RESULTS_NAME
 MU_DIR = RESULTS / "mu_cache"
 S_CACHE = RESULTS / "S_cache.parquet"
 OUT = RESULTS / "lmp_cache.parquet"

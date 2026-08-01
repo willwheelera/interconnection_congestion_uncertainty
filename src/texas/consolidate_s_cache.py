@@ -8,16 +8,21 @@ S, the driving constraint, and n_on. All duals for a given config live in one pa
 merge. The result feeds reconstruct_lmp and score_samplers.
 
 Usage:
-    uv run python -m texas.consolidate_s_cache
+    HARNESS_CASE=2025 uv run python -m texas.consolidate_s_cache
 """
 
 import glob
+import sys
 from pathlib import Path
 
 import pandas as pd
 
 REPO = Path(__file__).parents[2]
-RESULTS = REPO / "results" / "activsg2000"
+sys.path.insert(0, str(REPO / "src" / "texas"))
+
+from sample_harness import RESULTS_NAME          # results dir of the HARNESS_CASE sweep
+
+RESULTS = REPO / "results" / RESULTS_NAME
 MU_DIR = RESULTS / "mu_cache"
 OUT = RESULTS / "S_cache.parquet"
 

@@ -1,0 +1,212 @@
+/np1-301/60_cop_adj_period_snapshot
+    60-Day COP Adjustment Period Snapshot
+/np3-233-cd/hourly_res_outage_cap
+    Hourly Resource Outage Capacity
+/np3-565-cd/lf_by_model_weather_zone
+    Seven-Day Load Forecast by Model and Weather Zone
+/np3-566-cd/lf_by_model_study_area
+    Seven-Day Load Forecast by Model and Study Area
+/np3-765-cd/approved_dctie_schedules
+    Approved DC Tie Schedules
+/np3-910-er/2d_agg_dsr_loads
+    2-Day Aggregated DSR Loads
+/np3-910-er/2d_agg_gen_summary
+    2-Day Aggregated Generation Summary
+/np3-910-er/2d_agg_gen_summary_houston
+    2-Day Aggregated Generation Summary Houston
+/np3-910-er/2d_agg_gen_summary_north
+    2-Day Aggregated Generation Summary North
+/np3-910-er/2d_agg_gen_summary_south
+    2-Day Aggregated Generation Summary South
+/np3-910-er/2d_agg_gen_summary_west
+    2-Day Aggregated Generation Summary West
+/np3-910-er/2d_agg_load_summary
+    2-Day Aggregated Load Summary
+/np3-910-er/2d_agg_load_summary_houston
+    2-Day Aggregated Load Summary Houston
+/np3-910-er/2d_agg_load_summary_north
+    2-Day Aggregated Load Summary North
+/np3-910-er/2d_agg_load_summary_south
+    2-Day Aggregated Load Summary South
+/np3-910-er/2d_agg_load_summary_west
+    2-Day Aggregated Load Summary West
+/np3-910-er/2d_agg_out_sched
+    2-Day Aggregated Output Schedule
+/np3-910-er/2d_agg_out_sched_houston
+    2-Day Aggregated Output Schedule Houston
+/np3-910-er/2d_agg_out_sched_north
+    2-Day Aggregated Output Schedule North
+/np3-910-er/2d_agg_out_sched_south
+    2-Day Aggregated Output Schedule South
+/np3-910-er/2d_agg_out_sched_west
+    2-Day Aggregated Output Schedule West
+/np3-911-er/2d_agg_as_offers_ecrsm
+    2-Day Aggregated Ancillary Service Offers ECRSM
+/np3-911-er/2d_agg_as_offers_ecrss
+    2-Day Aggregated Ancillary Service Offers ECRSS
+/np3-911-er/2d_agg_as_offers_offns
+    2-Day Aggregated Ancillary Service Offers OFFNS
+/np3-911-er/2d_agg_as_offers_onns
+    2-Day Aggregated Ancillary Service Offers ONNS
+/np3-911-er/2d_agg_as_offers_regdn
+    2-Day Aggregated Ancillary Service Offers REGDN
+/np3-911-er/2d_agg_as_offers_regup
+    2-Day Aggregated Ancillary Service Offers REGUP
+/np3-911-er/2d_agg_as_offers_rrsffr
+    2-Day Aggregated Ancillary Service Offers RRSFFR
+/np3-911-er/2d_agg_as_offers_rrspfr
+    2-Day Aggregated Ancillary Service Offers RRSPFR
+/np3-911-er/2d_agg_as_offers_rrsufr
+    2-Day Aggregated Ancillary Service Offers RRSUFR
+/np3-911-er/2d_cleared_dam_as_ecrsm
+    2-Day Cleared DAM Ancillary Service ECRSM
+/np3-911-er/2d_cleared_dam_as_ecrss
+    2-Day Cleared DAM Ancillary Service ECRSS
+/np3-911-er/2d_cleared_dam_as_nspin
+    2-Day Cleared DAM Ancillary Service NSPIN
+/np3-911-er/2d_cleared_dam_as_regdn
+    2-Day Cleared DAM Ancillary Service REGDN
+/np3-911-er/2d_cleared_dam_as_regup
+    2-Day Cleared DAM Ancillary Service REGUP
+/np3-911-er/2d_cleared_dam_as_rrsffr
+    2-Day Cleared DAM Ancillary Service RRSFFR
+/np3-911-er/2d_cleared_dam_as_rrspfr
+    2-Day Cleared DAM Ancillary Service RRSPFR
+/np3-911-er/2d_cleared_dam_as_rrsufr
+    2-Day Cleared DAM Ancillary Service RRSUFR
+/np3-911-er/2d_self_arranged_as_ecrsm
+    2-Day Self Arranged Ancillary Service ECRSM
+/np3-911-er/2d_self_arranged_as_ecrss
+    2-Day Self Arranged Ancillary Service ECRSS
+/np3-911-er/2d_self_arranged_as_nspin
+    2-Day Self Arranged Ancillary Service NSPIN
+/np3-911-er/2d_self_arranged_as_nspnm
+    2-Day Self Arranged Ancillary Service NSPNM
+/np3-911-er/2d_self_arranged_as_regdn
+    2-Day Self Arranged Ancillary Service REGDN
+/np3-911-er/2d_self_arranged_as_regup
+    2-Day Self Arranged Ancillary Service REGUP
+/np3-911-er/2d_self_arranged_as_rrsffr
+    2-Day Self Arranged Ancillary Service RRSFFR
+/np3-911-er/2d_self_arranged_as_rrspfr
+    2-Day Self Arranged Ancillary Service RRSPFR
+/np3-911-er/2d_self_arranged_as_rrsufr
+    2-Day Self Arranged Ancillary Service RRSUFR
+/np3-965-er/60_hdl_ldl_man_override
+    60-Day HDL and LDL Manual Override Summary
+/np3-965-er/60_load_res_data_in_sced
+    60-Day Load Resource Data in SCED
+/np3-965-er/60_sced_dsr_load_data
+    60-Day SCED DSR Load Data
+/np3-965-er/60_sced_eoc_updates_in_ophour
+    60-Day SCED Energy Offer Curve Updates in Operating Hour
+/np3-965-er/60_sced_gen_res_data
+    60-Day SCED Gen Resource Data
+/np3-965-er/60_sced_qse_self_arranged_as
+    60-Day QSE-specific Self-Arranged AS in SCED
+/np3-965-er/60_sced_smne_gen_res
+    60-Day SCED Settlement Metered Net Energy for Generation Resources
+/np3-966-er/60_dam_energy_bid_awards
+    60-Day DAM Energy Bid Awards
+/np3-966-er/60_dam_energy_bids
+    60-Day DAM Energy Bids
+/np3-966-er/60_dam_energy_only_offer_awards
+    60-Day DAM Energy Offer Only Awards
+/np3-966-er/60_dam_energy_only_offers
+    60-Day DAM Energy Only Offers
+/np3-966-er/60_dam_gen_res_as_offers
+    60-Day DAM Generation Resources AS Offers
+/np3-966-er/60_dam_gen_res_data
+    60-Day DAM Generation Resource Data
+/np3-966-er/60_dam_load_res_as_offers
+    60-Day DAM Load Resources AS Offers
+/np3-966-er/60_dam_load_res_data
+    60-Day DAM Load Resource Data
+/np3-966-er/60_dam_ptp_obl_bid_awards
+    60-Day DAM PTP Obligation Bid Awards
+/np3-966-er/60_dam_ptp_obl_bids
+    60-Day DAM PTP Obligation Bids
+/np3-966-er/60_dam_ptp_obl_opt
+    60-Day DAM PTP Obligation Option
+/np3-966-er/60_dam_ptp_obl_opt_awards
+    60-Day DAM PTP Obligation Option Awards
+/np3-966-er/60_dam_qse_self_as
+    60-Day DAM QSE Self Arranged AS
+/np3-990-ex/60_sasm_gen_res_as_offer_awards
+    60-Day SASM Generation Resource AS Offer Awards
+/np3-990-ex/60_sasm_gen_res_as_offers
+    60-Day SASM Generation Resource AS Offers
+/np3-990-ex/60_sasm_load_res_as_offer_awards
+    60-Day SASM Load Resource AS Offer Awards
+/np3-990-ex/60_sasm_load_res_as_offers
+    60-Day SASM Load Resource AS Offers
+/np3-991-ex/60_cop_all_updates
+    60-Day COP All Updates
+/np4-159-cd/load_distribution_factors
+    Load Distribution Factors
+/np4-179-cd/total_as_service_offers
+    Total Ancillary Service Offers
+/np4-183-cd/dam_hourly_lmp
+    DAM Hourly LMPs
+/np4-188-cd/dam_clear_price_for_cap
+    DAM Clearing Prices for Capacity
+/np4-190-cd/dam_stlmnt_pnt_prices
+    DAM Settlement Point Prices
+/np4-191-cd/dam_shadow_prices
+    DAM Shadow Prices
+/np4-196-m/dam_price_corrections_eblmp
+    DAM Price Corrections for EBLMP
+/np4-196-m/dam_price_corrections_mcpc
+    DAM Price Corrections for MCPC
+/np4-196-m/dam_price_corrections_spp
+    DAM Price Corrections for SPP
+/np4-197-m/rtm_price_corrections_eblmp
+    RTM Price Corrections for EB LMP
+/np4-197-m/rtm_price_corrections_shadow
+    RTM Price Corrections for Shadow Prices
+/np4-197-m/rtm_price_corrections_soglmp
+    RTM Price Corrections for SOG LMP
+/np4-197-m/rtm_price_corrections_sogprice
+    RTM Price Corrections for SOG Price
+/np4-197-m/rtm_price_corrections_splmp
+    RTM Price Corrections SP LMP
+/np4-197-m/rtm_price_corrections_spp
+    RTM Price Corrections for SPP
+/np4-33-cd/dam_as_plan
+    DAM Ancillary Service Plan
+/np4-442-cd/hrly_sys_reg_wind_fcast_model
+    Hourly System-wide and Regional Wind Forecasts by Model
+/np4-523-cd/dam_system_lambda
+    DAM System Lambda
+/np4-732-cd/wpp_hrly_avrg_actl_fcast
+    Wind Power Production - Hourly Averaged Actual and Forecasted Values
+/np4-733-cd/wpp_actual_5min_avg_values
+    Wind Power Production - Actual 5-Minute Averaged Values
+/np4-737-cd/spp_hrly_avrg_actl_fcast
+    Solar Power Production - Hourly Averaged Actual and Forecasted Values
+/np4-738-cd/spp_actual_5min_avg_values
+    Solar Power Production - Actual 5-Minute Averaged Values
+/np4-742-cd/wpp_hrly_actual_fcast_geo
+    Wind Power Production - Hourly Averaged Actual and Forecasted Values by Geographical Region
+/np4-743-cd/wpp_actual_5min_avg_values_geo
+    Wind Power Production - Actual 5-Minute Averaged Values by Geographical Region
+/np4-745-cd/spp_hrly_actual_fcast_geo
+    Solar Power Production - Hourly Averaged Actual and Forecasted Values by Geographical Region
+/np4-746-cd/spp_actual_5min_avg_values_geo
+    Solar Power Production - Actual 5-Minute Averaged Values by Geographical Region
+/np6-322-cd/sced_system_lambda
+    SCED System Lambda
+/np6-345-cd/act_sys_load_by_wzn
+    Actual System Load by Weather Zone
+/np6-346-cd/act_sys_load_by_fzn
+    Actual System Load by Forecast Zone
+/np6-787-cd/lmp_electrical_bus
+    LMP by Electrical Bus
+/np6-788-cd/lmp_node_zone_hub
+    LMPs by Resource Nodes, Load Zones and Trading Hubs
+/np6-86-cd/shdw_prices_bnd_trns_const
+    SCED Shadow Prices and Binding Transmission Constraints
+/np6-905-cd/spp_node_zone_hub
+    Settlement Point Prices at Resource Nodes, Hubs and Load Zones
+/np6-970-cd/rtd_lmp_node_zone_hub
+    RTD Indicative LMPs by Resource Nodes, Load Zones and Hubs

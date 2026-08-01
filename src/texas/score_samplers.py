@@ -10,7 +10,7 @@ nominal law is the real per-generator Bernoulli (each queue candidate online wit
 calibrated p), which is a zero-coupling MRF so `MarkovRandomField` is reused directly.
 
 Usage:
-    uv run python -m texas.score_samplers
+    HARNESS_CASE=2025 uv run python -m texas.score_samplers
 """
 
 import json
@@ -21,8 +21,11 @@ import numpy as np
 
 REPO = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(REPO / "src"))                   # tail_sampling + utils packages
+sys.path.insert(0, str(REPO / "src" / "texas"))
 
 import pandas as pd
+
+from sample_harness import RESULTS_NAME                 # results dir of the HARNESS_CASE sweep
 
 from tail_sampling.problem_setup import Problem, write_parquet_meta
 from tail_sampling.mrf import MarkovRandomField
@@ -32,7 +35,7 @@ import tail_sampling.ascent_importance_sampling as ais
 import tail_sampling.smc_tilting as smc
 import tail_sampling.ascent_exact_mass as exact
 
-S_CACHE = REPO / "results" / "activsg2000" / "S_cache.parquet"
+S_CACHE = REPO / "results" / RESULTS_NAME / "S_cache.parquet"
 QUEUE = REPO / "data" / "activsg2000_queue20.json"
 
 

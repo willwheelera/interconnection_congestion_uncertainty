@@ -36,7 +36,7 @@ logging.getLogger('pyomo.core').addFilter(lambda r: getattr(r, 'id', None) != 'W
 
 REPO_ROOT = Path(__file__).parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
-DEFAULT_CASE = REPO_ROOT / "data" / "case14_gen_per_bus.json"
+DEFAULT_CASE = REPO_ROOT / "data" / "case30_gen_per_bus.json"
 
 
 def parse_args():
@@ -162,6 +162,9 @@ def run_many_cases(case_path, solver="gurobi"):
         out = []
         for i in range(int(2**ngen)):
             av = list(map(int, np.binary_repr(i, ngen)))
+            # Resume support: skip configs whose output already exists on disk.
+            if result_path(case_path, av).exists():
+                continue
             out.append(ex.submit(run, md, av, case_path, total_load=total_load, solver=solver))
         for o in out:
             total_configs += 1
@@ -240,8 +243,8 @@ def run_load_scan(case_path, solver="gurobi"):
 
 if __name__ == "__main__":
     t0 = time.perf_counter()
-    case_path = REPO_ROOT / "data" / "case14_gen_per_bus.json"
-    #run_many_cases(case_path)
+    case_path = REPO_ROOT / "data" / "case30_gen_per_bus.json"
+    run_many_cases(case_path, solver="gurobi")
     #run_nminus1_cases(case_path, 7)
-    run_load_scan(case_path)
+    #run_load_scan(case_path)
     print(f"time {time.perf_counter()-t0:.2f}")
