@@ -3,7 +3,12 @@
 `cases.screen_contingencies` keeps only the contingencies that bind in a spread of stress
 configurations -- on ACTIVSg2000 that is 33 of 2756, which is what makes a 2^20
 enumeration affordable.  The kept set is a union over stress configurations, so it is not
-exact by construction; it is made exact after the fact, here.
+exact by construction.
+
+A sweep run with `--screened` now closes that gap as it goes, checking every solve against
+the dropped contingencies and growing the set when one is violated, so this is a check on
+a finished cache rather than the step that makes it exact.  It should find nothing.  A
+violation means the cache was written before that loop existed -- both Texas caches were.
 
 For each audited configuration this re-solves the screened SCDCOPF and then recomputes
 every *dropped* contingency's post-outage flows at the solved dispatch.  A configuration

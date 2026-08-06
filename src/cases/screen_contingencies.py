@@ -11,15 +11,13 @@ run through the same `model.scdcopf` path a sweep uses, at the case's own recipe
 screened at a case JSON's native rating (typically a looser 1.5 factor) omits binders that
 the tightened factor needs.
 
-**The kept set is what the sweeps solve, and it is verified after the fact, not before.**
-It is a union over the stress configurations, so a configuration outside them can bind a
-dropped contingency -- on case14_queue one configuration in 62 does, and its max mu comes
-out 2% low.  What makes the screened sweep ground truth rather than an approximation is
-`sweeps.audit_screening`, which recomputes every dropped contingency's post-outage flows at
-the solved dispatch; an empty result proves the screened solution is also the full problem's
-solution, because adding constraints that are already satisfied cannot change the optimum.
-Screening is what keeps a 2^20 enumeration affordable; the audit is what makes it exact.
-Run the audit before using a sweep -- a missed binder makes duals wrong, not imprecise.
+**The kept set is a starting point, not a final answer.**  It is a union over the stress
+configurations, so a configuration outside them can bind a dropped contingency -- on
+case14_queue one configuration in 62 does, and its max mu comes out 2% low.  A screened
+sweep therefore grows the set as it runs: every solve checks the dropped contingencies at
+its own dispatch, and a chunk that turns one up is redone after `augment_screened` adds it
+here.  Screening is what keeps a 2^20 enumeration affordable; the growth is what keeps it
+exact.  The better this screen is, the fewer times a sweep has to stop and rebuild.
 
 Writes `data/<case>_screened.json` (the full case with its contingency set filtered) and
 `data/<case>_contingencies_screened.json` (the kept names, the recipe screened under, and
@@ -90,6 +88,30 @@ def write_screened(case, kept, found, configs, n_total):
         "contingencies": {c: {"n_configs_bound": found[c][0], "max_mu": found[c][1]}
                           for c in kept},
     }, indent=2))
+
+
+def augment_screened(case, names, chunk):
+    """Add contingencies to an existing screened set in place; return the new kept count.
+
+    Called by the sweep when a solve violates a contingency screening dropped: the set the
+    workers read has to grow before that configuration can be solved correctly.  The
+    filtered case is rebuilt from the full one so the additions carry their real data, and
+    the record remembers which chunk each addition surfaced in -- a screened set is then
+    reproducible as "screening plus what the sweep found", not an unexplained file.
+    """
+    data = json.loads(case.case_file.read_text())
+    record = json.loads(case.contingency_file.read_text())
+    kept = list(record["contingencies"]) + [n for n in names
+                                            if n not in record["contingencies"]]
+    data["elements"]["contingency"] = {k: data["elements"]["contingency"][k] for k in kept}
+    case.screened_file.write_text(json.dumps(data))
+
+    for n in names:
+        record["contingencies"].setdefault(
+            n, {"n_configs_bound": 0, "max_mu": 0.0, "found_in_sweep_chunk": chunk})
+    record["n_kept"] = len(kept)
+    case.contingency_file.write_text(json.dumps(record, indent=2))
+    return len(kept)
 
 
 def previous_kept(case):

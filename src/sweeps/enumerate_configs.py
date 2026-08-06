@@ -6,11 +6,13 @@ against: all 2^ngen configurations solved once each, so the per-line tail probab
 as a table lookup.  `--mode random` and `--mode leq_k` sweep subsets instead, for a
 direct-Monte-Carlo check or the low-cardinality shell.
 
-**The full sweep uses the full contingency set, not the screened one.**  Screening is a
-union over stress configurations and is not exact -- on case14_queue one configuration in
-62 binds a screened-out contingency and comes out 2% low.  That is a fine trade for a
-diagnostic run and a bad one for ground truth, and the full set costs only about 12% more
-on case30 and 2.3x on case118.  `--screened` trades exactness back for speed.
+`--screened` solves the screened contingency set and stays exact by growing it: every
+solve checks the contingencies screening dropped against its own dispatch, and a chunk
+that turns any of them up is redone after the set is enlarged and written back to
+`data/<case>_screened.json`.  What lands in the cache is therefore always the full
+problem's solution, at the cost of the check -- measured on activsg2000_original_v12,
+snapshot 2025-02-19 06:00: 26.7 ms/config to solve the 33-contingency screened set,
+371.3 with the check, against 570.4 for the full 2756-contingency set outright.
 
 Output, identical for both case families so `sweeps.build_target_cache` and
 `sweeps.build_dual_cache` ingest either unchanged:
@@ -34,13 +36,13 @@ slimmed relief set could not fully serve.  Configuration ids are MSB-first over 
 candidate order in the queue file.
 
 Parts that already exist are skipped, so an interrupted sweep resumes where it stopped.
-`--shard i/n` splits a full sweep across jobs on chunk boundaries, so each shard writes
-exactly the parts an unsharded run would, into the same cache directory: shards are
-disjoint, can run concurrently on separate nodes, and can resume each other.
+One sweep job runs at a time per case: a second concurrent job would race it for the
+screened file the augmenting loop rewrites.  Cores are filled by the worker pool, not by
+splitting the configuration range across jobs.
 
 Usage:
     uv run python -m src.sweeps.enumerate_configs --case case14_queue --workers 8
-    uv run python -m src.sweeps.enumerate_configs --case activsg2000_2025 --shard 3/8
+    uv run python -m src.sweeps.enumerate_configs --case activsg2000_2025 --screened
     uv run python -m src.sweeps.enumerate_configs --case case30_queue --mode random --n 20000
 """
 
@@ -53,9 +55,11 @@ import numpy as np
 import pandas as pd
 
 from src.cases import registry
+from src.cases.screen_contingencies import augment_screened
 from src.model import evaluator
 
 CHUNK = 2000            # configurations dispatched to the workers per part file
+MAX_AUGMENT_ROUNDS = 10  # redos one chunk may take before the contingency set settles
 
 MU_COLUMNS = ["id", "n_on", "constraint", "mu"]
 SNAPMAX_COLUMNS = ["id", "n_on", "snapshot", "max_mu", "max_line",
@@ -81,19 +85,6 @@ def config_bits(mode, ngen, n, probs, k, seed):
         bits = (rng.random((n, ngen)) < probs[None, :]).astype(np.int8)
     _, keep = np.unique(bits @ powers(ngen), return_index=True)
     return bits[np.sort(keep)]
-
-
-def shard_bounds(n_configs, shard, n_shards):
-    """Contiguous [lo, hi) config range for one shard, aligned to CHUNK boundaries.
-
-    Splitting by whole chunks rather than evenly by configuration is what makes sharded
-    and unsharded runs interchangeable: every shard writes exactly the part files a
-    single run would, so either can resume the other and no two shards name the same part.
-    """
-    n_chunks = -(-n_configs // CHUNK)
-    lo = shard * n_chunks // n_shards
-    hi = (shard + 1) * n_chunks // n_shards
-    return lo * CHUNK, min(hi * CHUNK, n_configs)
 
 
 def snapshot_rows(chunk, results, pw):
@@ -125,12 +116,37 @@ def config_rows(chunk, results, pw):
     return rows, aux
 
 
-def sweep(case, target, bits, out_dir, offset=0):
-    """Solve every configuration in chunks, writing one resumable part pair per chunk.
+def solve_chunk(case, target, chunk, make_rows, pw, tag):
+    """Solve one chunk, growing the contingency set until nothing dropped is violated.
 
-    `offset` is this shard's position in the global configuration order; parts are named
-    by the global index so shards share one cache directory.
+    Every solve checks the contingencies screening dropped against its own dispatch, and
+    the parent unions those findings across workers as it drains the results -- so a
+    contingency any worker needs is discovered once for all of them, not once each.  A
+    non-empty union means this chunk was solved against an incomplete set: the set is
+    enlarged on disk, the workers are rebuilt against it (a model's PTDF fixes its
+    contingency set at construction), and the chunk is redone before anything is written.
+
+    Only the discovering chunk is redone.  A chunk that came back clean is optimal for the
+    full problem already, because the constraints it did not carry were satisfied at its
+    optimum and adding satisfied constraints cannot move it.  The set grows monotonically
+    within the case's full N-1 list, so discoveries taper and the loop terminates.
     """
+    for _ in range(MAX_AUGMENT_ROUNDS):
+        target.discovered.clear()
+        results = target.evaluate_detailed(chunk.tolist())
+        if not target.discovered:
+            return make_rows(chunk, results, pw)
+        found = sorted(target.discovered)
+        n_kept = augment_screened(case, found, tag)
+        print(f"  chunk {tag}: +{len(found)} contingencies {found} -> {n_kept} kept; "
+              f"rebuilding workers and redoing the chunk", flush=True)
+        target.restart()
+    raise RuntimeError(f"{case.name}: chunk {tag} was still finding new contingencies after "
+                       f"{MAX_AUGMENT_ROUNDS} augmentations")
+
+
+def sweep(case, target, bits, out_dir):
+    """Solve every configuration in chunks, writing one resumable part pair per chunk."""
     make_rows = snapshot_rows if case.parallel == "snapshot" else config_rows
     aux_columns = SNAPMAX_COLUMNS
     mu_dir, aux_dir = out_dir / "mu_cache", out_dir / "snapmax_cache"
@@ -139,12 +155,12 @@ def sweep(case, target, bits, out_dir, offset=0):
 
     pw, t0, solved = powers(bits.shape[1]), time.time(), 0
     for start in range(0, len(bits), CHUNK):
-        part = mu_dir / f"part_{offset + start:08d}.parquet"
-        aux_part = aux_dir / f"part_{offset + start:08d}.parquet"
+        part = mu_dir / f"part_{start:08d}.parquet"
+        aux_part = aux_dir / f"part_{start:08d}.parquet"
         if part.exists() and aux_part.exists():
             continue
         chunk = bits[start:start + CHUNK]
-        rows, aux = make_rows(chunk, target.evaluate_detailed(chunk.tolist()), pw)
+        rows, aux = solve_chunk(case, target, chunk, make_rows, pw, start)
         pd.DataFrame(rows, columns=MU_COLUMNS).to_parquet(part)
         pd.DataFrame(aux, columns=aux_columns).to_parquet(aux_part)
         solved += len(chunk)
@@ -168,33 +184,23 @@ def main():
                         help="Gurobi threads per worker (default follows the parallel axis)")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--screened", action="store_true",
-                        help="solve the screened contingency set; exact once the dropped "
-                             "contingencies are audited at the solved dispatch")
-    parser.add_argument("--shard", default="0/1",
-                        help="i/n: solve only shard i of n (--mode full)")
+                        help="solve the screened contingency set, growing it whenever a "
+                             "solve violates a contingency screening dropped")
     args = parser.parse_args()
-
-    shard, n_shards = (int(v) for v in args.shard.split("/"))
-    assert 0 <= shard < n_shards, f"--shard {args.shard}: need 0 <= i < n"
-    assert n_shards == 1 or args.mode == "full", "--shard only applies to --mode full"
 
     case = registry.get(args.case)
     bits = config_bits(args.mode, case.ngen, args.n, case.build_p(), args.k, args.seed)
-    lo, hi = shard_bounds(len(bits), shard, n_shards) if args.mode == "full" else (0, len(bits))
     out_dir = (case.results_dir if args.mode == "full"
                else Path(case.results_dir).with_name(f"{case.name}_{args.mode}"))
 
     print(f"{case.name}: {args.mode} sweep, {len(bits)} configs, {case.ngen} candidates, "
           f"{case.parallel}-parallel, "
           f"{'screened' if args.screened else 'full'} contingencies -> {out_dir}", flush=True)
-    if n_shards > 1:
-        print(f"shard {shard}/{n_shards}: configs [{lo}, {hi}) "
-              f"= {-(-(hi - lo) // CHUNK)} chunks", flush=True)
 
     t0 = time.time()
     with evaluator.for_case(case, n_workers=args.workers, screened=args.screened,
                             threads=args.threads) as target:
-        mu_dir = sweep(case, target, bits[lo:hi], out_dir, offset=lo)
+        mu_dir = sweep(case, target, bits, out_dir)
     print(f"done in {(time.time() - t0) / 3600:.2f} h -> {mu_dir}")
 
 

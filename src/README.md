@@ -76,7 +76,7 @@ uv run python -m src.sweeps.enumerate_configs --case case30_queue --workers 16
 uv run python -m src.sweeps.build_target_cache --case case30_queue
 uv run python -m src.sweeps.build_dual_cache   --case case30_queue
 
-# 5. prove step 2 did not throw away a binder -- read this before trusting step 3
+# 5. re-check the finished cache against every dropped contingency
 uv run python -m src.sweeps.audit_screening    --case case30_queue
 
 # 6. estimate, describe, draw
@@ -86,15 +86,15 @@ uv run python -m src.figures.descriptors
 ```
 
 Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
-resumes, and `--shard i/n` splits it across jobs.  Step 5 is not optional: a screened set
-that misses a binding contingency produces duals that are wrong, not merely imprecise, and
-nothing earlier in the pipeline detects it.
+resumes; run one sweep job per case at a time, because a screened sweep rewrites the
+contingency set of step 2 as it goes.  Step 5 re-checks a finished cache, and on a sweep
+run with `--screened` it should find nothing — the sweep already guarantees that.
 
 ## Running a sweep on the cluster
 
 `src/sweeps/submit_cluster.py` opens with a settings block — which cases, the partition,
-cores, shards, walltimes, and three switches (`SCREENED`, `DRY_RUN`, `TEST`).  Edit it and
-run it; `src/sweeps/vacc.slurm` beside it is the batch script it submits.
+cores, walltimes, and three switches (`SCREENED`, `DRY_RUN`, `TEST`).  Edit it and run it;
+`src/sweeps/vacc.slurm` beside it is the batch script it submits.
 
 ```bash
 uv sync                                          # login node, once
@@ -106,7 +106,7 @@ Each case becomes a chain of dependent jobs, and a preparation step is submitted
 its output file is missing:
 
 ```
-select_relief_set -> screen_contingencies -> sweep (array of SHARDS) x LINKS
+select_relief_set -> screen_contingencies -> sweep x LINKS
                                                  -> build_target_cache -> audit_screening
 ```
 
@@ -114,32 +114,67 @@ Both preparation steps depend on where the queue sits, so **a new queue gets its
 set and its own screened contingency set** — neither is inherited from another case, even
 one sharing the same network and fleet.  Screening runs at the case's own recipe, which
 includes its relief set, so it waits on relief selection.  The sweep links are chained with
-`--dependency=afterany` so a shard stopped at the walltime is continued by the next; cached
+`--dependency=afterany` so a job stopped at the walltime is continued by the next; cached
 chunks are skipped, and a case whose enumeration is already complete gets only the last two
-jobs.
+jobs.  There is one sweep job per case at a time, never an array: a screened sweep rewrites
+`data/<case>_screened.json` as it runs, and concurrent jobs would race for it.  A node is
+filled by the evaluator's worker pool instead.
 
-The contingency set dominates the cost.  Measured on ACTIVSg2000, one worker per snapshot,
-one Gurobi thread, warm-started re-solves: 403 ms/config over the full 2756-contingency set
-against 12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB resident
-per worker.  Screening is what makes a 2^20 enumeration affordable; the audit is what makes
-it exact, which is why the chain ends there rather than at the sweep.
+### How a screened sweep stays exact
+
+Screening is a union over stress configurations, so a configuration outside them can bind a
+contingency screening dropped — and then its duals are wrong, not merely imprecise.  The
+sweep closes that gap itself rather than leaving it to a later check:
+
+1. **Every solve checks its own dispatch.**  A worker recomputes the post-outage flows of
+   every dropped contingency at the point it just solved and returns the violated names
+   with the duals.  No second solve — the dispatch is already in hand.
+2. **The chunk boundary combines the workers.**  The parent unions the violated names as it
+   drains the results, so a contingency any worker needs is discovered once for all of them.
+3. **A discovery enlarges the set and redoes the chunk.**  The additions are written into
+   `data/<case>_screened.json` and its record, the workers are rebuilt against it (a model's
+   PTDF fixes its contingency set at construction, so it cannot be extended in place), and
+   the chunk is re-run before any parquet is written.
+4. **Earlier chunks stand.**  A chunk that came back clean is already optimal for the full
+   problem: the constraints it did not carry were satisfied at its optimum, and adding
+   satisfied constraints cannot move it.  Only the discovering chunk is redone.
+
+The set grows monotonically inside the case's full N-1 list, so discoveries taper and the
+loop terminates; `MAX_AUGMENT_ROUNDS` in `sweeps/enumerate_configs.py` errors out rather
+than looping if one chunk keeps finding new ones.  The set can end up slightly larger than a
+perfect screen — a contingency violated at an intermediate optimum need not bind at the
+corrected one — which costs a little speed and no accuracy.
+
+Verified on `case14_queue`: with the screened set cut to two contingencies, a 286-config
+sweep discovered 11 more in one round and reproduced a full-19-contingency sweep to
+1.1e-13 on every one of the 1082 duals.
+
+The contingency set dominates the cost.  Measured on `activsg2000_original_v12`, snapshot
+2025-02-19 06:00, one worker per snapshot, one Gurobi thread, warm-started re-solves:
+
+| | ms/config |
+|---|---|
+| screened set (33 contingencies), solve only | 26.7 |
+| screened set + the per-solve check | 371.3 |
+| full set (2756 contingencies) | 570.4 |
+
+So exactness costs 1.5x less this way than by carrying the whole N-1 set, and the check —
+2723 post-outage flow calculations, one per dropped contingency — is 93% of it.  Resident
+memory is 0.24 GB per worker screened against 0.89 GB full.
 
 ### Reading the audit
 
 `sweeps/audit_screening.py` re-solves a selection of configurations — the largest `max_mu`,
-plus a uniform sample — and recomputes every *dropped* contingency's post-outage flows at
-the solved dispatch.  A configuration with no violation is proved exact: adding constraints
-the solution already satisfies cannot move the optimum, so the screened duals are the full
-problem's duals.  A configuration with a violation is not slightly off; its sweep entry is
-wrong and the case needs re-screening.
+plus a uniform sample — and recomputes every dropped contingency's post-outage flows at the
+solved dispatch.  It is now a check on a finished cache rather than the thing that makes it
+exact: a sweep run with `--screened` should audit clean, and a violation means the cache was
+written by an older sweep.
 
-This is not hypothetical.  `activsg2000_original_v12` ships a 33-contingency screened set
-whose record carries no recipe, because it was screened before the factor-1.2 recipe existed
-— and the audit fails on it.  On the 2025-02-19 06:00 snapshot, contingency 457 overloads
-branch 449 by 0.36%; putting that one contingency back in the model prices it at the $3500
-cap, moves the objective by 0.11%, and moves that snapshot's `sum_mu` from 25288 to 28770.
-For comparison, `activsg2000_2025`, screened by the current recipe-aware screener, keeps 104
-contingencies where v12 keeps 33.
+That is not hypothetical.  Both Texas caches predate the augmenting loop and fail the audit:
+`activsg2000_original_v12` on 500 of 500 configurations, `activsg2000_2025` on 100 of 100,
+worst overload 112.5% of limit.  The root cause was EGRET's `max_violations_per_iteration`
+(see `model/scdcopf.py`), which made the *screening* solves miss binders; both cases need
+re-screening and re-sweeping.
 
 ## The data contract between stages
 

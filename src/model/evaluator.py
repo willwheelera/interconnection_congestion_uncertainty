@@ -29,9 +29,11 @@ from src.model.soft_limits import thermal_violations
 def _worker(case, snapshot, screened, threads, task_q, result_q):
     """Build this worker's model once, then serve tasks until told to stop.
 
-    A task is (kind, config id, config).  "solve" returns the duals plus the overload
-    and shed the recipe's relief mechanisms had to buy; "audit" instead reports which
-    screened-out contingencies the resulting dispatch violates.
+    A task is (kind, config id, config).  "solve" returns the duals, the overload and
+    shed the recipe's relief mechanisms had to buy, and the names of any screened-out
+    contingencies the dispatch violates; "audit" reports those violations in full detail
+    and nothing else.  A screened solve always carries its own check, so no result
+    leaves a worker without the evidence that it is exact.
     """
     logging.getLogger("egret").setLevel(logging.WARNING)
     pm = build_persistent(case, snapshot, screened=screened, threads=threads)
@@ -41,8 +43,9 @@ def _worker(case, snapshot, screened, threads, task_q, result_q):
         if kind == "audit":
             result_q.put((cid, sid, pm.audit_dropped(case.case_file)))
         else:
+            dropped = [v[0] for v in pm.audit_dropped(case.case_file)] if screened else []
             result_q.put((cid, sid, mus, thermal_violations(pm.m, pm.base_mva),
-                          pm.load_shed()))
+                          pm.load_shed(), dropped))
 
 
 class _Pool:
@@ -55,6 +58,10 @@ class _Pool:
         self.candidates = case.candidates()
         self.ctx = mp.get_context("spawn")
         self.workers, self.result_q = [], None
+        # Screened-out contingencies some solve has violated since this was last
+        # cleared, unioned over every worker as the parent drains the results.  A
+        # caller that acts on it (the sweep does) clears it before each batch.
+        self.discovered = set()
 
     def _spawn(self, snapshot, task_q):
         p = self.ctx.Process(target=_worker,
@@ -62,6 +69,16 @@ class _Pool:
                                    task_q, self.result_q))
         p.start()
         self.workers.append(p)
+
+    def restart(self):
+        """Rebuild every worker, picking up whatever the case's screened file now holds.
+
+        A model's PTDF fixes its contingency set at construction, so an enlarged set can
+        only reach the workers by building them again.
+        """
+        self.close()
+        self.workers = []
+        self.start()
 
     def __enter__(self):
         self.start()
@@ -90,8 +107,9 @@ class ConfigParallel(_Pool):
             self.task_q.put(("solve", cid, list(cfg)))
         out = [None] * len(configs)
         for _ in range(len(configs)):
-            cid, _sid, mus, overload, shed = self.result_q.get()
+            cid, _sid, mus, overload, shed, dropped = self.result_q.get()
             out[cid] = (mus, overload, shed)
+            self.discovered.update(dropped)
         return out
 
     def evaluate(self, configs):
@@ -136,7 +154,7 @@ class SnapshotParallel(_Pool):
         self.task_qs = []
 
     def start(self):
-        self.result_q = self.ctx.Queue()
+        self.result_q, self.task_qs = self.ctx.Queue(), []
         for s in self.snapshots:
             tq = self.ctx.Queue()
             self.task_qs.append(tq)
@@ -164,7 +182,8 @@ class SnapshotParallel(_Pool):
         totals = defaultdict(lambda: defaultdict(float))
         snap = defaultdict(list)
         for _ in range(len(configs) * n):
-            cid, sid, mus, overload, shed = self.result_q.get()
+            cid, sid, mus, overload, shed, dropped = self.result_q.get()
+            self.discovered.update(dropped)
             for k, v in mus.items():
                 totals[cid][k] += v
             con, mu = max(mus.items(), key=lambda kv: kv[1], default=("none", 0.0))
