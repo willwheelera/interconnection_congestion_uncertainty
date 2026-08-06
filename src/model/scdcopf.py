@@ -23,7 +23,6 @@ a snapshot record scales loads by weather zone and derates renewables to that ho
 import json
 from pathlib import Path
 
-import numpy as np
 import pyomo.environ as pyo
 import egret.common.lazy_ptdf_utils as lpu
 from egret.common.solver_interface import _solve_model
@@ -33,14 +32,11 @@ from egret.model_library.defn import BasePointType
 from egret.models.dcopf import _lazy_ptdf_dcopf_model_solve_loop
 from egret.models.scopf import create_scopf_model
 
+from src.model.dropped_flows import DroppedFlowCheck
 from src.model.relief import (add_lostload_generators_ordc, add_queue_generators,
                           scale_loads_by_zone, scale_renewables_by_snapshot,
                           set_emergency_factor)
 from src.model.soft_limits import enable_soft_limits
-
-# Post-contingency overflow (per unit) above which a dropped contingency counts as
-# violated at the screened optimum -- about 0.01 MW on a 100 MVA base.
-AUDIT_TOL = 1e-4
 
 # How many violations EGRET's lazy loop may track in one pass.  Its default of 5 is wrong
 # for this recipe.  The soft thermal limits leave several monitored constraints violated at
@@ -79,7 +75,7 @@ class PersistentModel:
         self.names = list(cap_pu)
         self.base_mva = base_mva
         self.screened = screened             # contingency names actually in the model
-        self._audit_ptdf = None
+        self._check = None                   # DroppedFlowCheck, built on first audit
 
     def solve(self, config) -> dict[str, float]:
         """Apply a configuration via candidate bounds, warm re-solve, return mu."""
@@ -100,23 +96,14 @@ class PersistentModel:
 
         An empty result proves the screened solution is also the full problem's solution:
         adding already-satisfied constraints cannot change the optimum.  Each entry is
-        (contingency, worst branch, |post-outage flow| pu, emergency limit pu).
+        (contingency, worst branch, |post-outage flow| pu, emergency limit pu).  The check
+        is built on first use, which is when the dropped set is known.
         """
-        if self._audit_ptdf is None:
-            self._audit_ptdf = build_audit_ptdf(self.md, full_case)
-        ptdf = self._audit_ptdf
-        PFV, _, VA = ptdf.calculate_PFV(self.m)
-        limits, bkeys = ptdf.contingency_limits_array, ptdf.branches_keys
-        violated = []
-        for cn in ptdf.contingencies:
-            if cn in self.screened:
-                continue
-            post = PFV + ptdf.calculate_PFV_delta(cn, PFV, VA)
-            over = np.abs(post) - limits
-            j = int(np.argmax(over))
-            if over[j] > AUDIT_TOL:
-                violated.append((cn, bkeys[j], float(abs(post[j])), float(limits[j])))
-        return violated
+        if self._check is None:
+            ptdf = build_audit_ptdf(self.md, full_case)
+            dropped = {cn for cn in ptdf.contingencies if cn not in self.screened}
+            self._check = DroppedFlowCheck(ptdf, dropped)
+        return self._check.violations(self.m)
 
 
 def build_audit_ptdf(md, full_case) -> VirtualPTDFMatrix:

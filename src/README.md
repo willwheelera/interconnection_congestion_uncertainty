@@ -154,13 +154,16 @@ The contingency set dominates the cost.  Measured on `activsg2000_original_v12`,
 
 | | ms/config |
 |---|---|
-| screened set (33 contingencies), solve only | 26.7 |
-| screened set + the per-solve check | 371.3 |
+| screened set (33 contingencies), solve only | 26.4 |
+| screened set + the per-solve check | 38.2 |
 | full set (2756 contingencies) | 570.4 |
 
-So exactness costs 1.5x less this way than by carrying the whole N-1 set, and the check —
-2723 post-outage flow calculations, one per dropped contingency — is 93% of it.  Resident
-memory is 0.24 GB per worker screened against 0.89 GB full.
+So exactness costs 45% on top of the screened solve, and 15x less than carrying the whole
+N-1 set.  The check computes post-outage flows for 2723 contingencies that have no flow
+variables in the model; `model/dropped_flows.py` precomputes their flow-shift columns once
+per worker (71 MB) rather than letting EGRET re-solve the network 2723 times per
+configuration, which is what took it from 345 ms to 11.8.  Resident memory is 0.24 GB per
+worker screened against 0.89 GB full.
 
 ### Reading the audit
 

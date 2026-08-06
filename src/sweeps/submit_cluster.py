@@ -67,11 +67,11 @@ TEST_CONFIGS = 200
 SCRIPT = REPO_ROOT / "src" / "sweeps" / "vacc.slurm"
 
 # Measured on activsg2000_original_v12, one worker per snapshot, one Gurobi thread, warm
-# re-solves, on the development machine: 371 ms/config for the screened set plus the
-# per-solve check on the contingencies screening dropped (26.7 of that is the solve; the
-# check dominates), 570 for the full 2756-contingency set.  The cluster ran the screened
-# solve about twice as fast, so these overestimate; only used to print an estimate.
-MS_PER_CONFIG = 371.0 if SCREENED else 570.0
+# re-solves, on the development machine: 38 ms/config for the screened set plus the
+# per-solve check on the contingencies screening dropped (26.4 solve, 11.8 check), 570 for
+# the full 2756-contingency set.  The cluster ran the screened solve about twice as fast,
+# so these overestimate; only used to print an estimate.
+MS_PER_CONFIG = 38.0 if SCREENED else 570.0
 
 SWEEP_ARGS = ["--screened"] if SCREENED else []
 if TEST:
