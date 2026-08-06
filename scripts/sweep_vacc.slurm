@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # One shard of a congestion-dual sweep on UVM's VACC.
 #
-# Submitted by `src.sweeps.submit_cluster`, which checks the case's inputs, sizes the
-# array, and chains the links -- everything this script would otherwise have to decide.
-# It reads SWEEP_CASE and SWEEP_SHARDS from the submission; any further sweep options
-# arrive as arguments to this script.
+# Submitted by `src.sweeps.submit_cluster`, whose settings block holds everything this
+# script would otherwise have to decide: which cases, how many shards, the walltime, and
+# the chaining.  SWEEP_CASE and SWEEP_SHARDS arrive from the submission; any further
+# sweep options arrive as arguments to this script.
 #
 # The sweep skips chunks that are already cached, so a job killed at the walltime loses
 # only the chunk in flight and the next link continues from there.
 
 #SBATCH --job-name=amps-sweep
-#SBATCH --partition=bluemoon
+#SBATCH --partition=general
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10

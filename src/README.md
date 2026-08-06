@@ -87,17 +87,19 @@ resumes, and `--shard i/n` splits it across jobs.
 
 ## Running a sweep on the cluster
 
+`src/sweeps/submit_cluster.py` opens with a settings block — which cases, how many shards,
+walltime, and three switches (`SCREENED`, `DRY_RUN`, `TEST`).  Edit it and run it:
+
 ```bash
-uv sync                                                              # login node, once
-uv run python -m src.sweeps.submit_cluster --case <case> --test      # ~5 min, validates
-uv run python -m src.sweeps.submit_cluster --case <case> [<case> ...]
+uv sync                                          # login node, once
+uv run python -m src.sweeps.submit_cluster       # with TEST = True first, ~5 min
+uv run python -m src.sweeps.submit_cluster       # then TEST = False
 ```
 
-`submit_cluster` checks each case's inputs, reports how much of its enumeration is already
-cached and what the rest will cost, then submits `scripts/sweep_vacc.slurm` as an array of
-shards, chained with `--dependency=afterany` so a shard stopped at the walltime is
-continued by the next link.  `--dry-run` prints the sbatch commands without submitting.
-The batch script itself only solves one shard.
+It checks each case's inputs, reports how much of its enumeration is already cached and
+what the rest will cost, then submits `scripts/sweep_vacc.slurm` as an array of shards,
+chained with `--dependency=afterany` so a shard stopped at the walltime is continued by
+the next link.  The batch script itself only solves one shard.
 
 Rerunning after a partial sweep is safe and cheap: cached chunks are skipped, and a case
 with nothing left is reported and not submitted.
