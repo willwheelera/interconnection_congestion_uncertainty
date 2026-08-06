@@ -87,8 +87,9 @@ resumes, and `--shard i/n` splits it across jobs.
 
 ## Running a sweep on the cluster
 
-`src/sweeps/submit_cluster.py` opens with a settings block — which cases, how many shards,
-walltime, and three switches (`SCREENED`, `DRY_RUN`, `TEST`).  Edit it and run it:
+`src/sweeps/submit_cluster.py` opens with a settings block — which cases, the partition,
+cores, shards, walltimes, and three switches (`SCREENED`, `DRY_RUN`, `TEST`).  Edit it and
+run it; `src/sweeps/vacc.slurm` beside it is the batch script it submits.
 
 ```bash
 uv sync                                          # login node, once
@@ -96,19 +97,27 @@ uv run python -m src.sweeps.submit_cluster       # with TEST = True first, ~5 mi
 uv run python -m src.sweeps.submit_cluster       # then TEST = False
 ```
 
-It checks each case's inputs, reports how much of its enumeration is already cached and
-what the rest will cost, then submits `scripts/sweep_vacc.slurm` as an array of shards,
-chained with `--dependency=afterany` so a shard stopped at the walltime is continued by
-the next link.  The batch script itself only solves one shard.
+Each case becomes a chain of dependent jobs, and a preparation step is submitted only when
+its output file is missing:
 
-Rerunning after a partial sweep is safe and cheap: cached chunks are skipped, and a case
-with nothing left is reported and not submitted.
+```
+select_relief_set  ->  screen_contingencies  ->  sweep (array of SHARDS) x LINKS
+```
 
-The contingency set dominates the cost.  Measured on ACTIVSg2000, one snapshot, one Gurobi
-thread, warm-started re-solves: 403 ms/config over the full 2756-contingency set against
-12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB resident per
-worker.  A full 2^20 sweep is therefore ~117 h, or ~15 h across eight shards; `--screened`
-trades exactness for ~34x.
+Both preparation steps depend on where the queue sits, so **a new queue gets its own relief
+set and its own screened contingency set** — neither is inherited from another case, even
+one sharing the same network and fleet.  Screening runs at the case's own recipe, which
+includes its relief set, so it waits on relief selection.  The sweep links are chained with
+`--dependency=afterany` so a shard stopped at the walltime is continued by the next; cached
+chunks are skipped, and a case with nothing left is reported and not submitted.
+
+The contingency set dominates the cost.  Measured on ACTIVSg2000, one worker per snapshot,
+one Gurobi thread, warm-started re-solves: 403 ms/config over the full 2756-contingency set
+against 12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB resident
+per worker.  Screening is what makes a 2^20 enumeration affordable; `evaluator.audit`, which
+recomputes every dropped contingency's post-outage flows at the solved dispatch, is what
+makes it exact.  That method has no entry point of its own yet — the audit is currently
+reachable only from Python, not from a script.
 
 ## The data contract between stages
 
@@ -206,6 +215,18 @@ tight constraints against 6 free generators, versus 46 against 78 on Texas.  Not
 this is a property of the solver — dual simplex, primal simplex, and barrier with crossover
 give identical duals on a fresh model — nor of tied generator costs, which produce multiple
 optimal *dispatches* rather than multiple prices.
+
+**Worker count is part of this.**  `SnapshotParallel` now runs several replica workers per
+snapshot so a sweep fills its whole allocation, and each replica sees a different subset of
+the configurations, so their resident constraint sets diverge in exactly the way above.
+Measured on `activsg2000_original_v12`, screened set, 1 replica against 3: individual
+constraint duals move by up to ~100 $/MWh, while `max_mu` moves by at most 0.34 $/MWh out
+of ~1500 (2e-4 relative).  Two 1-replica runs of the same configurations agree to 1e-3 on
+any constraint and 1e-9 on `max_mu`, so the divergence is the replicas, not the solver, and
+it does not shrink as workers accumulate history (tested at 5, 21, and 64 configurations
+per worker).  The scalar targets are unaffected at any threshold of interest; per-line work
+off `dual_cache` is the part that would notice.  Set `CPUS` to the snapshot count in
+`submit_cluster` to get back one worker per snapshot.
 
 Concretely: re-running `case14_queue` twice changes about 8 of 66,000 dual rows; re-running
 against a cache built on a different day changes about 120 rows and roughly 0.2% of

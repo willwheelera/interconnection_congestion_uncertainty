@@ -161,14 +161,15 @@ def main():
     parser.add_argument("--mode", default="full", choices=["full", "random", "leq_k"])
     parser.add_argument("--n", type=int, default=20000, help="draws for --mode random")
     parser.add_argument("--k", type=int, default=5, help="max candidates on for --mode leq_k")
-    parser.add_argument("--workers", type=int, default=8,
-                        help="config-parallel worker count; snapshot-parallel cases pin "
-                             "one worker per snapshot and ignore this")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="core budget for the worker pool (default: the cores "
+                             "Slurm allocated, or this machine's affinity)")
     parser.add_argument("--threads", type=int, default=None,
                         help="Gurobi threads per worker (default follows the parallel axis)")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--screened", action="store_true",
-                        help="solve the screened contingency set (faster, not exact)")
+                        help="solve the screened contingency set; exact once the dropped "
+                             "contingencies are audited at the solved dispatch")
     parser.add_argument("--shard", default="0/1",
                         help="i/n: solve only shard i of n (--mode full)")
     args = parser.parse_args()

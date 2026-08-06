@@ -11,11 +11,15 @@ run through the same `model.scdcopf` path a sweep uses, at the case's own recipe
 screened at a case JSON's native rating (typically a looser 1.5 factor) omits binders that
 the tightened factor needs.
 
-**The kept set is an approximation, not a reduction.**  It is a union over the stress
-configurations, and a configuration outside them can bind a dropped contingency: on
-case14_queue one configuration in 62 does, and its max mu comes out 2% low.  So the
-screened case is for fast interactive runs, and `sweeps.enumerate_configs` defaults to the
-full set for ground truth.
+**The kept set is what the sweeps solve, and it is verified after the fact, not before.**
+It is a union over the stress configurations, so a configuration outside them can bind a
+dropped contingency -- on case14_queue one configuration in 62 does, and its max mu comes
+out 2% low.  What makes the screened sweep ground truth rather than an approximation is
+`PersistentModel.audit_dropped`, reached through `evaluator.audit`: it recomputes every
+dropped contingency's post-outage flows at the solved dispatch, and an empty result proves
+the screened solution is also the full problem's solution, because adding constraints that
+are already satisfied cannot change the optimum.  Screening is what keeps a 2^20
+enumeration affordable; the audit is what makes it exact.
 
 Writes `data/<case>_screened.json` (the full case with its contingency set filtered) and
 `data/<case>_contingencies_screened.json` (the kept names, the recipe screened under, and
@@ -133,7 +137,7 @@ def main():
     parser = argparse.ArgumentParser()
     registry.add_case_arg(parser, allow_all=True)
     parser.add_argument("--n-stress", type=int, default=32)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     for case in registry.resolve(args.case):

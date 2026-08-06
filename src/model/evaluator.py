@@ -6,18 +6,20 @@ Which axis the work is split along depends on the case:
 
   ConfigParallel     one load level, so `n_workers` identical models each take whole
                      configurations off a shared queue.  Used by the IEEE queue cases.
-  SnapshotParallel   a collection of load snapshots that mu is averaged over, so there
-                     is one worker per snapshot and each configuration is broadcast to
-                     all of them.  Used by the Texas cases, where a worker's model is
-                     pinned to its snapshot's scaled loads and derated renewables.
+  SnapshotParallel   a collection of load snapshots that mu is averaged over, so each
+                     configuration is broadcast to every snapshot.  Used by the Texas
+                     cases, where a worker's model is pinned to its snapshot's scaled
+                     loads and derated renewables.
 
-`for_case` picks the right one from the case record, so callers never choose.  Both
-expose the same `evaluate` / `evaluate_detailed` interface and return results in the
-order the configurations were given, so a sweep or a sampler is written once.
+`for_case` picks the right one from the case record and sizes it to the cores actually
+available, so callers never choose.  Both expose the same `evaluate` /
+`evaluate_detailed` interface and return results in the order the configurations were
+given, so a sweep or a sampler is written once.
 """
 
 import logging
 import multiprocessing as mp
+import os
 from collections import defaultdict
 
 from src.model.scdcopf import build_persistent, scalar_target  # noqa: F401  (re-exported)
@@ -104,11 +106,18 @@ class ConfigParallel(_Pool):
 
 
 class SnapshotParallel(_Pool):
-    """One worker per load snapshot; each configuration is broadcast to all of them."""
+    """`replicas` workers per load snapshot; each configuration goes to every snapshot.
 
-    def __init__(self, case, screened=True, threads=0):
+    One worker per snapshot uses only as many cores as the case has snapshots, which
+    leaves most of a cluster node idle.  Replicas put several workers on each snapshot's
+    queue so a chunk's configurations are shared between them; every (configuration,
+    snapshot) pair is still produced exactly once, so the aggregation is unchanged.
+    """
+
+    def __init__(self, case, screened=True, threads=1, replicas=1):
         super().__init__(case, screened, threads)
         self.snapshots = case.snapshots()
+        self.replicas = replicas
         self.task_qs = []
 
     def start(self):
@@ -116,7 +125,8 @@ class SnapshotParallel(_Pool):
         for s in self.snapshots:
             tq = self.ctx.Queue()
             self.task_qs.append(tq)
-            self._spawn(s, tq)
+            for _ in range(self.replicas):
+                self._spawn(s, tq)
 
     def _broadcast(self, kind, configs):
         for cid, cfg in enumerate(configs):
@@ -170,19 +180,35 @@ class SnapshotParallel(_Pool):
 
     def close(self):
         for tq in self.task_qs:
-            tq.put(None)
+            for _ in range(self.replicas):
+                tq.put(None)
         for p in self.workers:
             p.join()
 
 
-def for_case(case, n_workers=8, screened=True, threads=None):
-    """The evaluator the case's parallel axis calls for, already constructed.
+def available_cores():
+    """Cores this process may actually use: Slurm's allocation when set, else affinity."""
+    allocated = os.environ.get("SLURM_CPUS_PER_TASK")
+    return int(allocated) if allocated else len(os.sched_getaffinity(0))
 
-    `threads` is Gurobi threads per worker; the default follows the axis -- one thread
-    per config-parallel worker (the parallelism is already over configurations), and
-    Gurobi's own default for snapshot-parallel workers, which are far fewer.
+
+def for_case(case, n_workers=None, screened=True, threads=None):
+    """The evaluator the case's parallel axis calls for, sized to the cores available.
+
+    Leaving `n_workers` and `threads` unset fills the allocation with single-threaded
+    workers, which is what a sweep wants: these LPs parallelize far better over
+    configurations than inside one solve.  Both can be set to override that.
     """
+    cores = available_cores()
     if case.parallel == "config":
-        return ConfigParallel(case, n_workers, screened,
-                              threads=1 if threads is None else threads)
-    return SnapshotParallel(case, screened, threads=0 if threads is None else threads)
+        n = cores if n_workers is None else n_workers
+        print(f"evaluator: {n} config-parallel workers on {cores} cores", flush=True)
+        return ConfigParallel(case, n, screened, threads=1 if threads is None else threads)
+
+    n_snapshots = len(case.snapshots())
+    budget = cores if n_workers is None else n_workers
+    replicas = max(1, budget // n_snapshots)
+    print(f"evaluator: {n_snapshots} snapshots x {replicas} replicas = "
+          f"{n_snapshots * replicas} workers on {cores} cores", flush=True)
+    return SnapshotParallel(case, screened, threads=1 if threads is None else threads,
+                            replicas=replicas)

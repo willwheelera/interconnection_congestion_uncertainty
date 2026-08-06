@@ -264,13 +264,14 @@ def _texas(name, one_mu, case_file, **paths) -> Case:
 def _leveraged(tag) -> Case:
     """One activsg2000_original_v12 variant differing only in which queue sits on top.
 
-    Same network, fleet, snapshots, and relief set as v12, so the sweeps compare
-    directly; `one_mu` is unset because the most congested element is not known until
-    the case is swept.
+    Same network, fleet, and snapshots as v12, so the sweeps compare directly.  The
+    relief set and the screened contingency set are *not* inherited from v12: both
+    depend on which buses the queue sits at, so each variant selects and screens its
+    own.  `one_mu` is unset because the most congested element is not known until the
+    case is swept.
     """
     return _texas(f"activsg2000_v12_{tag}", None, DATA / "activsg2000.json",
-                  candidates=DATA / f"activsg2000_queue20_{tag}.json",
-                  relief=DATA / "activsg2000_original_v12_relief_set.json")
+                  candidates=DATA / f"activsg2000_queue20_{tag}.json")
 
 
 def _ieee(name, network, ngen, one_mu) -> Case:
