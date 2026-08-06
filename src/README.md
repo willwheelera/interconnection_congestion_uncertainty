@@ -85,6 +85,12 @@ uv run python -m src.figures.descriptors
 Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
 resumes; `--shard i/n` splits it across cluster jobs (see `scripts/sweep_vacc.slurm`).
 
+The contingency set dominates the sweep's cost.  Measured on ACTIVSg2000, one snapshot,
+one Gurobi thread, warm-started re-solves: 403 ms/config over the full 2756-contingency
+set against 12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB of
+resident memory per worker.  A full 2^20 sweep is therefore ~117 h of wall clock, which is
+why the cluster script runs eight shards; `--screened` trades exactness for ~34x.
+
 ## The data contract between stages
 
 Every case follows the same layout, which is what lets a stage consume the previous one's
