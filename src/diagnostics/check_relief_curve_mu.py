@@ -25,11 +25,11 @@ from egret.models.scopf import create_scopf_model
 from egret.models.dcopf import _lazy_ptdf_dcopf_model_solve_loop
 from egret.common.solver_interface import _solve_model
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 
-from model.relief import (add_queue_generators, add_lostload_generators,
+from src.model.relief import (add_queue_generators, add_lostload_generators,
                                    add_lostload_generators_ordc, scale_loads_by_zone)
-from model.soft_limits import enable_soft_limits, thermal_violations
+from src.model.soft_limits import enable_soft_limits, thermal_violations
 
 CASE = REPO_ROOT / "data" / "activsg2000_screened.json"
 QUEUE = REPO_ROOT / "data" / "activsg2000_queue20.json"

@@ -8,23 +8,25 @@ via `case_row(..., rank=True/False)`:
   values  raw descriptor magnitude vs the target with no fitted line -- the cloud itself is the
           evidence -- plus the combined raw linear fit as predicted-vs-actual.
 
-Writes results/mu_static_descriptors_<target>_{rank,values}.png.
+Writes results/mu_static_descriptors_<target>_<base>_{rank,values}.png.
 
 Usage:
-    uv run python -m figures.descriptors                # mean, the default
-    uv run python -m figures.descriptors quantile 0.95
-    uv run python -m figures.descriptors exceed 200
+    uv run python -m src.figures.descriptors                # mean, the default
+    uv run python -m src.figures.descriptors quantile 0.95
+    uv run python -m src.figures.descriptors exceed 200
+    uv run python -m src.figures.descriptors --base on      # compare against the modal base
 """
 
-import sys
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import rankdata, spearmanr
 
-from descriptors.study import (COLS, STUDY_CASES, compute_all, ols_r2, parse_target,
+from src.descriptors.compute import BASES, DEFAULT_BASE
+from src.descriptors.study import (COLS, STUDY_CASES, compute_all, ols_r2, parse_target,
                                r2_no_top)
-from paths import RESULTS
+from src.paths import RESULTS
 
 FIG_WIDTH, ROW_HEIGHT = 6.0, 1.7   # inches; 6 in wide fits a document text block
 # type sizes to match: a 4-panel row is only ~1.5 in wide, so everything shrinks with it
@@ -108,7 +110,7 @@ def legend_handle(lab, rank):
     return plt.Line2D([], [], **kwargs)
 
 
-def make_figure(data, lab, rank=False):
+def make_figure(data, lab, base, rank=False):
     """Grid of one row per case, in ranks (rank=True) or raw values; FIG_WIDTH inches wide."""
     subtitle = "rank ordering" if rank else "raw magnitude and combined linear fit"
     height = ROW_HEIGHT * len(STUDY_CASES) + 0.5
@@ -118,18 +120,24 @@ def make_figure(data, lab, rank=False):
             case_row(axes[c], *data[case], lab, rank)
             axes[c, 0].set_ylabel(f"{case}\n({regime})\n{target_axis(lab, rank)}")
         fig.legend(handles=[legend_handle(lab, rank)], loc="lower center", frameon=False)
-        fig.suptitle(f"Cheap static descriptors vs the sampled {lab}: {subtitle}")
+        fig.suptitle(f"Cheap static descriptors at the {base} base configuration "
+                     f"vs the sampled {lab}: {subtitle}")
         # strips reserved in inches, not fractions: they must not grow with the case count
         fig.tight_layout(rect=(0, 0.16 / height, 1, 1 - 0.24 / height), pad=0.6, w_pad=0.8)
     return fig
 
 
 def main():
-    target = parse_target(sys.argv[1:])
-    data = compute_all(target)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("target", nargs="*", help="mean | quantile <q> | exceed <thr>")
+    parser.add_argument("--base", default=DEFAULT_BASE, choices=BASES,
+                        help="base configuration; off needs an incumbent fleet")
+    args = parser.parse_args()
+    target = parse_target(args.target)
+    data = compute_all(target, args.base)
     for tag, rank in [("rank", True), ("values", False)]:
-        fig = make_figure(data, target.label, rank)
-        out = RESULTS / f"mu_static_descriptors_{target.tag}_{tag}.png"
+        fig = make_figure(data, target.label, args.base, rank)
+        out = RESULTS / f"mu_static_descriptors_{target.tag}_{args.base}_{tag}.png"
         fig.savefig(out, dpi=300)
         print("wrote", out)
     plt.show()

@@ -13,7 +13,7 @@ distinct constraint is (ConstraintName, ContingencyName): an element monitored
 under an assumed contingency. We group per physical element, i.e. ConstraintName.
 
 Usage:
-    uv run python -m figures.ercot.shadow_price_distributions
+    uv run python -m src.figures.ercot.shadow_price_distributions
 """
 
 import matplotlib.pyplot as plt
@@ -21,9 +21,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import BoundaryNorm, ListedColormap, LogNorm
 
-from ercot.data_paths import RESULTS as OUT_DIR
-from ercot.data_paths import SHADOW_PRICES as DATA_PATH
-from ercot.shadow_prices import (binding_summary, calendar_grid, dominant_frequency,
+from src.ercot.data_paths import RESULTS as OUT_DIR
+from src.ercot.data_paths import SHADOW_PRICES as DATA_PATH
+from src.ercot.shadow_prices import (binding_summary, calendar_grid, dominant_frequency,
                                  hourly_max_constraint, hourly_price_max,
                                  load_shadow_prices)
 TOP_N = 20

@@ -23,9 +23,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from paths import REPO_ROOT
-from ercot.data_paths import ERCOT_DATA
-from ercot.fetch_ercot import build_client
+from src.paths import REPO_ROOT
+from src.ercot.data_paths import ERCOT_DATA
+from src.ercot.fetch_ercot import build_client
 
 CONGESTION_CSV = ERCOT_DATA / "high_congestion_hours_base.csv"
 OUT = REPO_ROOT / "data" / "activsg2000_load_snapshots.csv"

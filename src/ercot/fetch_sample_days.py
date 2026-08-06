@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from ercot.fetch_ercot import PHASE2_DATASETS, build_client, fetch_days
+from src.ercot.fetch_ercot import PHASE2_DATASETS, build_client, fetch_days
 
-from ercot.data_paths import SAMPLE_DAYS_CSV
+from src.ercot.data_paths import SAMPLE_DAYS_CSV
 
 
 def load_sample_days(path):

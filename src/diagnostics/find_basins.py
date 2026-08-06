@@ -8,7 +8,7 @@ Needs a fully enumerated case: every configuration id from 0 to 2^ngen - 1 prese
 target cache, since the hill climb indexes neighbors by id arithmetic.
 
 Usage:
-    uv run python -m diagnostics.find_basins --case activsg2000_2025
+    uv run python -m src.diagnostics.find_basins --case activsg2000_2025
 """
 
 import argparse
@@ -18,7 +18,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from cases import registry
+from src.cases import registry
 
 
 def load_target(path):

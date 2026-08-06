@@ -33,14 +33,14 @@ from egret.data.model_data import ModelData
 from egret.models.dcopf import create_btheta_dcopf_model
 from egret.model_library.transmission.tx_utils import scale_ModelData_to_pu, unscale_ModelData_to_pu
 
-from sensitivity.barrier import (
+from src.sensitivity.barrier import (
     _extract_hour,
     _compute_mu_base,
     _network_state,
     RESULTS_DIR,
 )
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 
 
 def _solve_dcopf_with_rc(md: ModelData, barrier: bool = True):

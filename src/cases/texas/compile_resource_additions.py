@@ -24,7 +24,7 @@ from pathlib import Path
 
 import openpyxl
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 CDR = REPO_ROOT / "data" / "ercot_cdr" / "CapacityDemandandReservesReport_December2025.xlsx"
 OUT_ADDED = REPO_ROOT / "data" / "ercot_resource_additions_2017_2025.csv"
 OUT_PLANNED = REPO_ROOT / "data" / "ercot_resource_planned.csv"

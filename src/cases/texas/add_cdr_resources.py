@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 CASE = REPO_ROOT / "data" / "activsg2000.json"
 ADDITIONS = REPO_ROOT / "data" / "ercot_resource_additions_2017_2025.csv"
 PROJECTS = REPO_ROOT / "texas_model" / "ercot_queue" / "projects.json"

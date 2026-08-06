@@ -33,8 +33,8 @@ Writes two files per case: the EGRET case (data/<case>.json) and its queue
 (data/<case>_candidates.json), whose per-candidate build probabilities are the sampling law.
 
 Usage:
-    uv run python -m cases.build_ieee_queue
-    uv run python -m cases.build_ieee_queue --case case30_queue
+    uv run python -m src.cases.build_ieee_queue
+    uv run python -m src.cases.build_ieee_queue --case case30_queue
 """
 
 import argparse
@@ -50,7 +50,7 @@ from egret.data.model_data import ModelData
 from egret.models.dcopf import solve_dcopf
 from pandapower.converter import to_ppc
 
-from cases import registry
+from src.cases import registry
 
 # The pandapower network, queue size, and rating headroom over the incumbent-only flows
 # are per-case knobs and live in each case's registry `build` entry; everything below is

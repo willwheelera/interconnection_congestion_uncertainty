@@ -106,27 +106,27 @@ Every entry point takes `--case <name>` and reads its paths, queue, and modeling
 
 ```bash
 # build a testbed and screen its contingency set
-uv run python -m cases.build_ieee_queue     --case case30_queue
-uv run python -m cases.calibrate_ratings    --case case30_queue
-uv run python -m cases.screen_contingencies --case case30_queue
+uv run python -m src.cases.build_ieee_queue     --case case30_queue
+uv run python -m src.cases.calibrate_ratings    --case case30_queue
+uv run python -m src.cases.screen_contingencies --case case30_queue
 
 # exhaustive ground truth, then the common caches every consumer reads
-uv run python -m sweeps.enumerate_configs   --case case30_queue --workers 16
-uv run python -m sweeps.build_target_cache  --case case30_queue
-uv run python -m sweeps.build_dual_cache    --case case30_queue
+uv run python -m src.sweeps.enumerate_configs   --case case30_queue --workers 16
+uv run python -m src.sweeps.build_target_cache  --case case30_queue
+uv run python -m src.sweeps.build_dual_cache    --case case30_queue
 
 # estimate, describe, draw
-uv run python -m sampling.run_experiments        --case case30_queue
-uv run python -m figures.tail.per_line_survivor  --case case30_queue
-uv run python -m figures.descriptors
+uv run python -m src.sampling.run_experiments        --case case30_queue
+uv run python -m src.figures.tail.per_line_survivor  --case case30_queue
+uv run python -m src.figures.descriptors
 ```
 
 The sensitivity thread runs separately:
 
 ```bash
-uv run python -m sensitivity.barrier --dir case14_gen_per_bus        # barrier dmu/dP, dLMP/dP
-uv run python -m sensitivity.finite_difference                       # finite-difference cross-check
-uv run python -m figures.sensitivity results/sensitivity_barrier_<case>.json
+uv run python -m src.sensitivity.barrier --dir case14_gen_per_bus        # barrier dmu/dP, dLMP/dP
+uv run python -m src.sensitivity.finite_difference                       # finite-difference cross-check
+uv run python -m src.figures.sensitivity results/sensitivity_barrier_<case>.json
 ```
 
 ## Methods

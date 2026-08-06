@@ -14,10 +14,10 @@ import argparse
 import time
 from pathlib import Path
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 
 from egret.data.model_data import ModelData
-from model.dcopf import solve_opf, store_branch_duals
+from src.model.dcopf import solve_opf, store_branch_duals
 
 CASE = REPO_ROOT / "data" / "activsg2000.json"
 

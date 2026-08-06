@@ -15,8 +15,8 @@ and no shadow-price cap, so its duals are *not* the sweep's duals.  To compare a
 sweep, apply the case recipe first (`model.relief.set_emergency_factor` and friends).
 
 Usage:
-    uv run python -m diagnostics.cold_solve_reference --case activsg2000_2025
-    uv run python -m diagnostics.cold_solve_reference --case activsg2000_2025 --config 1 0 1 ...
+    uv run python -m src.diagnostics.cold_solve_reference --case activsg2000_2025
+    uv run python -m src.diagnostics.cold_solve_reference --case activsg2000_2025 --config 1 0 1 ...
 """
 
 import argparse
@@ -25,8 +25,8 @@ import copy
 from egret.data.model_data import ModelData
 from egret.models.scopf import solve_scopf
 
-from cases import registry
-from model.relief import add_queue_generators, scale_loads_by_zone, scale_renewables_by_snapshot
+from src.cases import registry
+from src.model.relief import add_queue_generators, scale_loads_by_zone, scale_renewables_by_snapshot
 
 
 def snapshot_mu(md_config, zone_scales, solver, renewable_cf=None):

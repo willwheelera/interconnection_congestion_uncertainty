@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ercot.shadow_prices import (
+from src.ercot.shadow_prices import (
     SHADOW_PRICES as DATA_PATH,
     hourly_max_constraint,
     load_shadow_prices,
@@ -30,7 +30,7 @@ from ercot.shadow_prices import (
 
 THRESHOLD = 300.0  # $/MWh; base-case hourly max clears this ~1% of hours
 N_PER_REGIME = 4  # sample days drawn from each regime for the base-vs-contingency test
-from ercot.data_paths import ERCOT_DATA as OUT_DIR
+from src.ercot.data_paths import ERCOT_DATA as OUT_DIR
 
 
 def select_subset(df: pd.DataFrame, kind: str) -> pd.DataFrame:

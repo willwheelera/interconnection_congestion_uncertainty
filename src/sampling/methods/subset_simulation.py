@@ -13,12 +13,12 @@ This file holds two of the compared samplers: `direct` (the baseline) and
 problem_setup.
 
 Usage:
-    uv run python -m sampling.methods.subset_simulation
+    uv run python -m src.sampling.methods.subset_simulation
 """
 
 import numpy as np
 
-from sampling.problem import Problem, REPO_ROOT
+from src.sampling.problem import Problem, REPO_ROOT
 
 
 def n_per_level_for_budget(budget, p0=0.1, n_levels=6):

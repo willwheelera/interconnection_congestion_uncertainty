@@ -18,7 +18,7 @@ Usage (vs the other samplers): the runner passes it in for Bernoulli cases only.
 
 import numpy as np
 
-import sampling.methods.ascent_importance_sampling as ais
+import src.sampling.methods.ascent_importance_sampling as ais
 
 
 def ce_round(problem, ev, rng, r, n, rho, floor):

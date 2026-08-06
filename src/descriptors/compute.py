@@ -6,7 +6,8 @@ scores them; this file produces them.
 
 Two sources, chosen by what the case's dual_cache actually carries.  A cache with `flow`
 and `p_gen` groups (the gen-per-bus testbeds recorded the full solution) already has
-everything, so the descriptors read straight out of the all-on row.  A security-constrained case stores only mu, and its constraints are N-1 pairs
+everything, so the descriptors read straight out of the base configuration's row.  A
+security-constrained case stores only mu, and its constraints are N-1 pairs
 ("base:{line}" or "ctg:{outage}:{line}") rather than plain lines, so this rebuilds the same
 two descriptors from ONE SCDCOPF solve per load snapshot at a chosen base configuration,
 through `model.scdcopf` so the recipe (emergency factor, ORDC relief, soft caps) matches
@@ -19,18 +20,21 @@ the sweep exactly:
     (capacity-factor derated) capacity at its bus and the existing fleet backs down in
     proportion to its dispatch at the base configuration.
 
-An incumbent-fleet case has a real grid at the queue-empty configuration, so the base
-configuration is a choice: "off" builds nothing, "on" builds every candidate, "modal"
-builds the most probable set (each candidate with p > 0.5).  A queue is unlikely to build
-out -- E[candidates online] is 5.4 of 20 on Texas -- so "off" and "modal" carry nominal
-probability mass and "on" carries almost none.
+Either way the base configuration is a choice: "off" builds nothing, "on" builds every
+candidate, and "modal" is the most probable configuration under the case's nominal law
+(`sampling.distributions.nominal_law`), found by enumeration rather than by thresholding
+the marginals so that a coupled law's mode is the real one.  The modal base is the default
+because it is the only one guaranteed to carry nominal probability mass: a queue is
+unlikely to build out -- E[candidates online] is 5.4 of 20 on Texas, so "on" is far
+outside the mass -- while on the gen-per-bus testbeds, whose law has no queue and favors
+availability, the mode *is* all-on and the modal base reproduces the earlier choice.
 
 Descriptors are averaged over the case's load snapshots, matching the load averaging of the
 mu target, and written with that configuration's load-averaged mu to
 results/<case>/static_descriptors_<base>.parquet.
 
 Usage:
-    uv run python -m descriptors.compute --case activsg2000_2025 --base off
+    uv run python -m src.descriptors.compute --case activsg2000_2025 --base modal
 """
 
 import argparse
@@ -41,20 +45,24 @@ from egret.data.model_data import ModelData
 from egret.model_library.defn import BasePointType
 from egret.model_library.transmission.tx_calc import calculate_ptdf
 
-from cases import registry
-from model.scdcopf import build_persistent
+from src.cases import registry
+from src.model.scdcopf import build_persistent
+from src.sampling.distributions import nominal_law
+from src.sampling.mrf import modal_config
+from src.utils.availability import avail_to_id
 
 BASES = ["off", "on", "modal"]
+DEFAULT_BASE = "modal"
 P_ON = 0.65   # nominal on-marginal for a case with no queue; a common scalar on sigma
 
 
-def base_config(base, p):
-    """The chosen base configuration as a 0/1 list over the queue candidates."""
+def base_config(case, base):
+    """The chosen base configuration as a 0/1 list over the case's candidates."""
     if base == "off":
-        return [0] * len(p)
+        return [0] * case.ngen
     if base == "on":
-        return [1] * len(p)
-    return [int(pi > 0.5) for pi in p]
+        return [1] * case.ngen
+    return modal_config(nominal_law(case)).tolist()
 
 
 def parse_constraint(cid):
@@ -141,19 +149,22 @@ def snapshot_descriptors(case, snapshot, constraints, p, config):
 def build_scdcopf(case, constraints, base):
     """Average the per-snapshot descriptors over the case's snapshots; add z = slack/sigma."""
     p = case.build_p()
-    config = base_config(base, p)
+    config = base_config(case, base)
     frames = [snapshot_descriptors(case, s, constraints, p, config) for s in case.snapshots()]
     d = sum(frames) / len(frames)
     d["z"] = d.slack / np.maximum(d.sigma, 1e-9)
     return d[["slack", "sigma", "z", "mu_base"]]
 
 
-def build_wide(case):
-    """Per-line slack, swing sigma, z, and base mu from a wide case's all-on dual_cache row.
+def build_wide(case, base):
+    """Per-line slack, swing sigma, z, and base mu from a wide case's dual_cache row.
 
-    No solve: the enumerated cache already holds the all-on flows and dispatch, and the
-    swing is the PTDF response to each generator dropping out with the rest of the fleet
-    picking up its output in proportion to their own.
+    No solve: the enumerated cache already holds the flows and dispatch of every
+    configuration, so the base configuration is just the row to read.  The swing is the
+    PTDF response to each generator toggling with the rest of the fleet absorbing its
+    output in proportion to their own dispatch at that row; the toggled amount is what the
+    generator produces when it is on, read off the all-on row, so a generator that the base
+    configuration leaves off still swings the flow it would swing if it were built.
     """
     md = ModelData.read(str(case.case_file))
     els = md.data["elements"]
@@ -167,15 +178,17 @@ def build_wide(case):
     g_bus = np.array([bi[g["bus"]] for g in gens.values()])
 
     dc = pd.read_parquet(case.dual_cache)
-    row = dc.loc[dc.index.max()]                                 # the all-on configuration
+    row = dc.loc[avail_to_id(base_config(case, base))]            # the base configuration
+    on_row = dc.loc[dc.index.max()]                               # the all-on configuration
     flow = np.array([row[("flow", b)] for b in branch_keys])
     mu_base = np.abs([row[("mu", b)] for b in branch_keys])
     pg = np.array([row[("p_gen", bus_keys[b])] for b in g_bus])
+    pg_on = np.array([on_row[("p_gen", bus_keys[b])] for b in g_bus])   # output when built
 
     Hg = ptdf[:, g_bus]
     tot = pg.sum()
     swing = ((Hg @ pg)[:, None] - Hg * pg[None, :]) / np.maximum(tot - pg, 1e-9)[None, :]
-    df = pg[None, :] * (swing - Hg)                              # (nline x ngen) MW flow swing
+    df = pg_on[None, :] * (swing - Hg)                           # (nline x ngen) MW flow swing
     sigma = np.sqrt(P_ON * (1 - P_ON) * (df ** 2).sum(axis=1))
     slack = ratings - np.abs(flow)
     return pd.DataFrame({"slack": slack, "sigma": sigma,
@@ -183,7 +196,7 @@ def build_wide(case):
                         index=branch_keys)
 
 
-def descriptors(case, base="off"):
+def descriptors(case, base=DEFAULT_BASE):
     """The case's per-constraint descriptors, by whichever source its model calls for.
 
     A dual_cache carrying `flow` and `p_gen` is read straight out, which is cheap.  Anything
@@ -191,23 +204,26 @@ def descriptors(case, base="off"):
     `main` writes and errors rather than silently launching that job.
     """
     if {"flow", "p_gen"} <= case.dual_cache_groups():
-        return build_wide(case)
+        return build_wide(case, base)
     cached = case.descriptor_cache(base)
     if not cached.exists():
         raise FileNotFoundError(
             f"{cached} not found; build it first with\n"
-            f"    uv run python -m descriptors.compute --case {case.name} --base {base}")
+            f"    uv run python -m src.descriptors.compute --case {case.name} --base {base}")
     return pd.read_parquet(cached)
 
 
 def main():
     parser = argparse.ArgumentParser()
     registry.add_case_arg(parser)
-    parser.add_argument("--base", default="off", choices=BASES)
+    parser.add_argument("--base", default=DEFAULT_BASE, choices=BASES)
     args = parser.parse_args()
     case = registry.get(args.case)
+    config = base_config(case, args.base)
+    print(f"{case.name} base={args.base}: {sum(config)}/{case.ngen} built, "
+          f"config id {avail_to_id(config)}")
     if {"flow", "p_gen"} <= case.dual_cache_groups():
-        d = build_wide(case)
+        d = build_wide(case, args.base)
     else:
         constraints = list(pd.read_parquet(case.dual_cache)["mu"].columns)
         d = build_scdcopf(case, constraints, args.base)

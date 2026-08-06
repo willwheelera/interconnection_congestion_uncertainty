@@ -21,7 +21,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results"
 
 

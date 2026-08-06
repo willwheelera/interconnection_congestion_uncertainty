@@ -36,9 +36,9 @@ import scipy.linalg
 
 from egret.data.model_data import ModelData
 
-from utils.solution_io import get_lmps
+from src.utils.solution_io import get_lmps
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results"
 
 EPS_MU = 1.0

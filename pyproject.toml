@@ -26,11 +26,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# src/ is the import root: every module/package under it (utils, grid_data,
-# tail_sampling, the loose top-level scripts) is importable by name once the
-# project is installed editable, with no sys.path manipulation.
+# The repository root is the import root, so `src` itself is the package and every
+# first-party import is `src.<stage>....`.  Fully qualifying them is what keeps a stage
+# package from being shadowed by a same-named sibling module when a file is run as a
+# script (see src/__init__.py).
 only-include = ["src"]
-sources = ["src"]
 
 [tool.uv]
 override-dependencies = ["lxml>=6.0"]

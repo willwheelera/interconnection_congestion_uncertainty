@@ -35,9 +35,9 @@ older `case14_gen_per_bus` / `case30_gen_per_bus` testbeds (`notes/paper_plan.md
 ## Pipeline
 
 ```bash
-uv run python -m cases.build_ieee_queue     --case case30_queue   # data/<case>.json + candidates
-uv run python -m cases.calibrate_ratings    --case case30_queue   # rewrites data/<case>.json
-uv run python -m cases.screen_contingencies --case case30_queue   # optional, fast runs only
+uv run python -m src.cases.build_ieee_queue     --case case30_queue   # data/<case>.json + candidates
+uv run python -m src.cases.calibrate_ratings    --case case30_queue   # rewrites data/<case>.json
+uv run python -m src.cases.screen_contingencies --case case30_queue   # optional, fast runs only
 ```
 
 Then `sweeps.enumerate_configs` for the ground truth; see `src/README.md`.

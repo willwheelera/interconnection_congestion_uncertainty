@@ -7,7 +7,7 @@ where it cannot shift any binding constraint.  This distinguishes them by solvin
 all-on configuration once per load snapshot and reading each candidate's pg.
 
 Usage:
-    uv run python -m diagnostics.check_queue_dispatch --case activsg2000_2025
+    uv run python -m src.diagnostics.check_queue_dispatch --case activsg2000_2025
 """
 
 import argparse
@@ -16,8 +16,8 @@ import multiprocessing as mp
 
 import pandas as pd
 
-from cases import registry
-from model.scdcopf import build_persistent
+from src.cases import registry
+from src.model.scdcopf import build_persistent
 
 
 def solve_snapshot(case, snapshot):

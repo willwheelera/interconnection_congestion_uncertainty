@@ -8,7 +8,7 @@ S, the driving constraint, and n_on. All duals for a given config live in one pa
 merge. The result feeds reconstruct_lmp.
 
 Usage:
-    uv run python -m diagnostics.consolidate_s_cache --case activsg2000_2025
+    uv run python -m src.diagnostics.consolidate_s_cache --case activsg2000_2025
 """
 
 import argparse

@@ -31,7 +31,7 @@ under.  **Every entry point takes `--case <name>`** and reads the rest from the 
 no script hardcodes a filename and no case needs custom code in a downstream stage.
 
 ```python
-from cases import registry
+from src.cases import registry
 case = registry.get("case30_queue")
 case.screened_file      # data/case30_queue_screened.json
 case.mu_cache           # results/case30_queue/mu_cache
@@ -63,23 +63,23 @@ runs with `-m` from anywhere.
 
 ```bash
 # 1. build the testbed and its queue          (once per case)
-uv run python -m cases.build_ieee_queue   --case case30_queue
-uv run python -m cases.calibrate_ratings  --case case30_queue
+uv run python -m src.cases.build_ieee_queue   --case case30_queue
+uv run python -m src.cases.calibrate_ratings  --case case30_queue
 
 # 2. screen the N-1 set for fast interactive runs (the ground-truth sweep skips this)
-uv run python -m cases.screen_contingencies --case case30_queue
+uv run python -m src.cases.screen_contingencies --case case30_queue
 
 # 3. exhaustive ground truth -> results/<case>/mu_cache/
-uv run python -m sweeps.enumerate_configs --case case30_queue --workers 16
+uv run python -m src.sweeps.enumerate_configs --case case30_queue --workers 16
 
 # 4. reduce to the common caches every consumer reads
-uv run python -m sweeps.build_target_cache --case case30_queue
-uv run python -m sweeps.build_dual_cache   --case case30_queue
+uv run python -m src.sweeps.build_target_cache --case case30_queue
+uv run python -m src.sweeps.build_dual_cache   --case case30_queue
 
 # 5. estimate, describe, draw
-uv run python -m sampling.run_experiments  --case case30_queue
-uv run python -m figures.tail.per_line_survivor --case case30_queue
-uv run python -m figures.descriptors
+uv run python -m src.sampling.run_experiments  --case case30_queue
+uv run python -m src.figures.tail.per_line_survivor --case case30_queue
+uv run python -m src.figures.descriptors
 ```
 
 Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
@@ -145,16 +145,45 @@ standard per-case directory now.
   lookup, and a categorical sampler, so no estimator assumes it is a product law.  See its
   README for the experiment matrix.
 - **`descriptors/`** — Claim 2 of the paper.  `compute.py` produces the descriptors,
-  `study.py` scores them, `figures/descriptors.py` draws the result.
+  `study.py` scores them, `figures/descriptors.py` draws the result.  `additivity.py` tests
+  the other cheap replacement for the sweep -- a linear model in the queue bits -- and finds
+  it fits only where one candidate carries the target, and never reaches the tail.
 - **`figures/`** — nothing here computes a result; each module reads a cache and renders it.
 
 ## Reproducibility note
 
-The SCDCOPF sweeps are **not bit-reproducible**.  Congestion duals are frequently
-degenerate, and with lazy PTDF a constraint only carries a dual once it has been added to
-the model — which depends on the order a warm worker happened to see configurations in.
-Re-running `case14_queue` twice changes about 8 of 66,000 dual rows; re-running against a
-cache built on a different day changes about 120 rows and roughly 0.2% of per-configuration
-`max_mu` values, occasionally by a large amount.  This predates the current layout (the
-pre-reorganization code diverges from the committed caches by the same amount).  Treat a
-committed `mu_cache` as *the* ground truth for a case rather than regenerating it casually.
+The SCDCOPF sweeps are **not bit-reproducible**, for two separate reasons.  They are
+distinguished by whether the *objective* moves when the same configuration is solved on a
+cold model and on a warm one.
+
+**Dropped constraints** (objective moves).  With lazy PTDF a constraint enters the model
+only once it is seen violated by more than EGRET's `rel_flow_tol = 1e-5`.  A constraint over
+its limit by less than that never enters, carries no dual, and reports `mu = 0`, and the
+solution is slightly infeasible — so the objective differs from a run in which some earlier
+configuration had already forced that constraint in.  Which constraints are resident depends
+on the order a warm worker happened to see configurations in.  This is what moves
+`case14_queue`: the 0.2% of configurations that differ between two sweeps are all of this
+kind, and they move a lot (worst case 449 $/MWh).  Texas takes a dropped constraint on
+essentially every configuration, but never one that reaches the peak, so `max_mu` is stable
+to below 1e-3 $/MWh.
+
+**Non-unique duals** (objective identical, `mu` differs).  The multiplier vector is pinned
+down only when the active constraint gradients are linearly independent over the free
+generators.  Measured per configuration as the rank of the tight PTDF rows (base and
+post-contingency, plus the power-balance row) restricted to the off-bound generators:
+`case14_queue` is always full rank, `activsg2000_2025` is always deficient by 4–6 rows out
+of ~46, and `case30_queue` is deficient on about a quarter of configurations.  Deficiency is
+necessary but not sufficient — nothing was observed to move with a full-rank active set, and
+most deficient configurations are stable anyway, because a wider optimal dual face need not
+be wide in the direction of `max_b mu_b`.  `case30_queue` is the case that actually moves
+(~8% of configurations, worst 32.8 $/MWh) because it is the most cornered: a median of 7
+tight constraints against 6 free generators, versus 46 against 78 on Texas.  Nothing about
+this is a property of the solver — dual simplex, primal simplex, and barrier with crossover
+give identical duals on a fresh model — nor of tied generator costs, which produce multiple
+optimal *dispatches* rather than multiple prices.
+
+Concretely: re-running `case14_queue` twice changes about 8 of 66,000 dual rows; re-running
+against a cache built on a different day changes about 120 rows and roughly 0.2% of
+per-configuration `max_mu` values.  This predates the current layout (the pre-reorganization
+code diverges from the committed caches by the same amount).  Treat a committed `mu_cache`
+as *the* ground truth for a case rather than regenerating it casually.

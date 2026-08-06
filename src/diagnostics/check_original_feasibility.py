@@ -25,10 +25,10 @@ import pyomo.environ as pyo
 from egret.data.model_data import ModelData
 from egret.models.scopf import solve_scopf
 
-from model.relief import (add_queue_generators, scale_loads_by_zone,
+from src.model.relief import (add_queue_generators, scale_loads_by_zone,
                                    scale_renewables_by_snapshot)
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 CASE = REPO_ROOT / "data" / "activsg2000_screened.json"
 QUEUE = REPO_ROOT / "data" / "activsg2000_queue20.json"
 COLLECTION = REPO_ROOT / "data" / "activsg2000_load_collection.json"

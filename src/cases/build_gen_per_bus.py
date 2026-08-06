@@ -27,7 +27,7 @@ import numpy as np
 import pandapower.networks as nw
 from pandapower.converter import to_ppc
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 OUT_PATH = REPO_ROOT / "data" / "case30_gen_per_bus.json"
 
 RATING_SCALE = 0.5            # shrink line ratings to induce congestion

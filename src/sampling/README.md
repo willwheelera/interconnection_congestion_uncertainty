@@ -30,11 +30,33 @@ is **not** baked into the library: it is selected by name from the `CASES` regis
 | axis | values |
 |------|--------|
 | case | `case14_gen_per_bus`, `case30_gen_per_bus`, `activsg2000_original`, `activsg2000_2025`, `activsg2000_original_v12` |
-| nominal law (`dist`) | `bernoulli` (J=0), `mrf_a` (J~0.04, ferromagnetic), `mrf_b` (J~N(0,0.08), mixed-sign), `mrf_c` (J~N(0,0.15), mixed-sign) |
+| nominal law (`dist`) | `bernoulli` (J=0), `mrf_a` (J~0.04, ferromagnetic), `mrf_b` (J~N(0,0.08), mixed-sign), `mrf_c` (J~N(0,0.15), mixed-sign). `COUPLED_NAMES` adds two structured laws, `mrf_cobuild` and `mrf_substitute` (below), selectable by `--dists` but not in the swept `DIST_NAMES` |
 | target | `max_mu`, `sum_mu`, `one_mu`, `one_lmp` (whichever the case's cache carries). `one_mu` is a single element, named per case in `cases.registry` (table below); unnamed cases fall back to the globally most-congested element |
 | snapshot | `multi` (averaged/nominal); `single` runs `max_mu` on the per-snapshot peak (Texas only) |
 | ascent move | `all` always; `best` / `top5` only where a sensitivity proxy exists — in practice case14 only, since case30 has no `sensitivity_cache.parquet` (use `--proxy live` to get them there) |
+| ascent-IS beta | `--betas` (default `0.2`, the weight the figures draw) — the defensive weight of the ascent-IS mixture; each value is written as its own method, `ascent_is_b0.5`, and costs one ascent-IS run |
 | budget | solver-call budgets, e.g. `640,2560` — one budget every sampler honors |
+
+### The structured laws (`mrf_cobuild`, `mrf_substitute`)
+
+`mrf_a/b/c` barely move the mu distribution: their coupling is an unstructured Gaussian
+draw spread thin over all `ngen*(ngen-1)/2` pairs, so the induced bit correlations stay
+under 0.05 and what little the tail does move comes partly from their marginals drifting
+(the mean-field field compensation is first order, so `mrf_c` misses its marginals by
+0.07). The two structured laws instead couple strongly *within a technology group*
+(`Case.candidate_groups()`, one block per fuel) at `GROUP_COUPLING = 2.0`, and solve for
+the field with `mrf.calibrate_field`, so their marginals match Bernoulli to 1e-12:
+
+| law | coupling | story |
+|-----|----------|-------|
+| `mrf_cobuild` | `+c` inside each fuel block | one technology's candidates build together or not at all (a technology-wide cost or policy shock) |
+| `mrf_substitute` | `-c` from each block's most probable candidate to the rest, `+c` among the rest | the near-certain project takes the interconnection capacity its class competes for; the speculative projects clear as a block only when it does not |
+
+On `activsg2000_original_v12` these two put the same probability on every individual
+candidate as Bernoulli and still separate `P[S > 1600]` by a factor of 117
+(`2.8e-4` vs `3.3e-2`, against Bernoulli's `4.6e-3`); on the `one_mu` element `ctg:68:18`
+at its 1e-3 level they separate by 135. `diagnostics/check_law_coupling.py` prints the
+table and `figures/tail/law_tail_compare.py` draws the curves.
 
 ### The `one_mu` element
 
@@ -65,7 +87,7 @@ matched solver-call budget. The key is `(method, ascent_move)`.
 |--------|------|------|
 | `direct` | `run_experiments.py` | Plain Monte Carlo from the nominal law (baseline; budget iid draws, uniform weights). |
 | `subset_sim` | `methods/subset_simulation.py` | Subset simulation (Au & Beck): nested conditional levels with a Metropolis kernel that accepts by the joint nominal pmf ratio (correct for a correlated law). |
-| `ascent_is` | `methods/ascent_importance_sampling.py` | Greedy single-flip ascent finds high-`S` modes; sample a defensive IS mixture seeded on them. Move `best`/`top5` rank flips by the sensitivity proxy. |
+| `ascent_is_b<beta>` | `methods/ascent_importance_sampling.py` | Greedy single-flip ascent finds high-`S` modes; sample a defensive IS mixture seeded on them, the nominal law carrying weight `beta`. Move `best`/`top5` rank flips by the sensitivity proxy. One method per `--betas` value: large `beta` caps the weights at `1/beta` but spends most of the sample on plain nominal draws, small `beta` leans on the modes. |
 | `smc_tilt` | `methods/smc_tilting.py` | SMC along the tilting path `q ∝ p_nom·exp(θS)`; stochastic bit-flip kernel; temperatures pooled by the balance heuristic. |
 | `ascent_exact` | `methods/ascent_exact_mass.py` | Same ascent + mixture as `ascent_is`, but exact nominal mass over the explored set, IS only on the unexplored remainder. |
 | `cross_entropy` | `methods/cross_entropy.py` | Cross-entropy IS fitting a product (Bernoulli) proposal to the tail; runs under the Bernoulli law only. |
@@ -75,16 +97,35 @@ matched solver-call budget. The key is `(method, ascent_move)`.
 | file | role |
 |------|------|
 | `problem.py` | `Problem` / `TargetProblem` for one cached case: loads `S`, the nominal law (as a generic weight vector), exact ground truth, per-config targets, bit/id helpers; mints `Evaluator`s (call counter). Reads the case list from `cases.registry`. |
-| `distributions.py` | Named nominal laws over `ngen` bits (`make_dist`, `DIST_NAMES`); `case_dist` for a registered case's own marginals. |
-| `mrf.py` | `MarkovRandomField` (pairwise binary MRF) — the only file that knows the law's form. |
+| `distributions.py` | Named nominal laws over `ngen` bits: `make_dist` builds one from its parameters (`DIST_NAMES`, `COUPLED_NAMES`, `P_STD`); `case_dist` returns a registered case's stored law. |
+| `build_laws.py` | Builds each named law at a case's marginals and technology groups and stores it — the only place a field is ever solved. |
+| `law_store.py` | Reads and writes a law's full definition, `results/<case>/laws/<name>.json`: `h`, `J`, target and realized marginals, groups, coupling. |
+| `mrf.py` | `MarkovRandomField` (pairwise binary MRF) — the only file that knows the law's form; `calibrate_field` solves for the field that reproduces given marginals under a given coupling. |
+| `diagnostics.check_law_coupling` | Per-law marginal error, bit correlations, distance to Bernoulli, and exact mu exceedance — the check that two laws differ in correlation only. |
 | `sensitivity.proxy` | Barrier-sensitivity proxy `s_k(x)` ranking which generator flip to evaluate; drives the `best`/`top5` ascent moves (`--proxy cached` or `live`). |
 | `sweeps.build_target_cache` | Reduce every testbed to one common per-config `target_cache.parquet`. |
 | `sweeps.build_dual_cache` | Build a compact wide `dual_cache.parquet` for a Texas case from its long `mu_cache`. |
-| `figures.style` | Shared plotting parameters (`COLORS`, `LABELS`) and the median + 10–90 replicate `band` helper. |
+| `figures.style` | Shared plotting parameters (`COLORS`, `LABELS`, the ascent-IS `BETA_COLORS` ramp), the method-key helpers (`parse_method`, `method_color`, `method_label`, `select_methods`), the shared `--methods` selection, and the median + 10–90 replicate `band` helper. |
 
 ## Plotting
 
 All read a case's parquet outputs under `results/<case>/`.
+
+Every comparison figure takes one selection option, `--methods`, whose values are the
+method names as they appear in the data (`figures.style.DEFAULT_METHODS` is what it draws
+without it):
+
+| `--methods` | draws |
+|-------------|-------|
+| *(omitted)* | `direct` and ascent-IS at beta 0.2 |
+| `all` | every method the sweep wrote |
+| `direct,ascent_is` | ascent-IS at every beta present, plus direct |
+| `ascent_is_b0.5` | that one beta |
+| `direct,subset_sim,smc_tilt,cross_entropy` | any explicit set |
+
+A name is a full method key, a sampler family covering its betas, or `all`; a name matching
+nothing in the data raises rather than silently dropping a curve. Anything but the default
+is tagged into the output filename, so a restricted figure never overwrites the default one.
 
 | file | shows |
 |------|-------|
@@ -110,11 +151,22 @@ All read a case's parquet outputs under `results/<case>/`.
 The project is an editable install rooted at `src/`, so modules import by name from any
 directory. Run the module form (`-m`):
 
-```bash
-uv run python -m sampling.run_experiments --case case14_gen_per_bus
-uv run python -m sampling.run_experiments --case case30_gen_per_bus --proxy live
-uv run python -m sampling.run_experiments --case all --n-rep 40 --budgets 640,2560
+A case's nominal laws are built and stored once, before anything samples or plots under
+them; `case_dist` then only reads `results/<case>/laws/<name>.json`, and a law that has
+not been built is an error rather than a silent rebuild.
 
-uv run python -m figures.tail.inverse_cdf --case case14_gen_per_bus
-uv run python -m figures.tail.per_line_survivor --case case14_gen_per_bus
+```bash
+uv run python -m src.sampling.build_laws --case all
+
+uv run python -m src.sampling.run_experiments --case case14_gen_per_bus
+uv run python -m src.sampling.run_experiments --case case30_gen_per_bus --proxy live
+uv run python -m src.sampling.run_experiments --case all --n-rep 40 --budgets 640,2560
+
+# extend an existing sweep with more ascent-IS defensive weights (tops the shards up)
+uv run python -m src.sampling.run_experiments --case activsg2000_original_v12 --betas 0.5,0.8
+
+uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus
+uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus
+uv run python -m src.figures.tail.target_grid --case activsg2000_original_v12 \
+    --methods direct,ascent_is
 ```

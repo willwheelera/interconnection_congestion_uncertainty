@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 CAP = 3500.0            # soft shadow-price cap ($/MWh)
 CAP_TOL = 0.5           # a cell within this of the cap counts as pinned
 SHED_TOL = 1.0          # load shed above this (MW) is a real fallback, not solver noise

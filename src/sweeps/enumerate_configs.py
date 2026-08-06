@@ -39,9 +39,9 @@ exactly the parts an unsharded run would, into the same cache directory: shards 
 disjoint, can run concurrently on separate nodes, and can resume each other.
 
 Usage:
-    uv run python -m sweeps.enumerate_configs --case case14_queue --workers 8
-    uv run python -m sweeps.enumerate_configs --case activsg2000_2025 --shard 3/8
-    uv run python -m sweeps.enumerate_configs --case case30_queue --mode random --n 20000
+    uv run python -m src.sweeps.enumerate_configs --case case14_queue --workers 8
+    uv run python -m src.sweeps.enumerate_configs --case activsg2000_2025 --shard 3/8
+    uv run python -m src.sweeps.enumerate_configs --case case30_queue --mode random --n 20000
 """
 
 import argparse
@@ -52,8 +52,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cases import registry
-from model import evaluator
+from src.cases import registry
+from src.model import evaluator
 
 CHUNK = 2000            # configurations dispatched to the workers per part file
 

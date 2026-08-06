@@ -25,10 +25,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.dataset as pads
 import pyarrow.parquet as pq
 
-from cases.registry import CASES, REPO_ROOT  # noqa: F401  (CASES re-exported for callers)
-from sampling.mrf import default_mrf
+from src.cases.registry import CASES, REPO_ROOT  # noqa: F401  (CASES re-exported for callers)
+from src.sampling.mrf import default_mrf
 
 DATA = REPO_ROOT / "data"
 
@@ -61,10 +62,19 @@ def write_experiment_shard(df, meta, case_dir, kind, budget):
     """Write one budget's slice of an experiment as its own parquet shard.
 
     Sharding by budget means a later run over a different budget set adds files rather than
-    overwriting an earlier run; only a rerun of the same budget replaces its own shard."""
+    overwriting an earlier run.  A rerun of the same budget replaces only the (law, method)
+    pairs it swept: rows of an existing shard under a pair this run did not produce are
+    carried through, so sweeping one law -- or one sampler, e.g. ascent-IS at a fresh beta --
+    tops the shard up instead of clobbering the rest."""
     d = experiment_dir(case_dir, kind)
     d.mkdir(exist_ok=True)
-    write_parquet_meta(df, {**meta, "budgets": [budget]}, d / f"b{budget}.parquet")
+    path = d / f"b{budget}.parquet"
+    keys = ["dist", "method"]
+    if path.exists():
+        old, _ = read_parquet_meta(path)
+        kept = old[~pd.MultiIndex.from_frame(old[keys]).isin(pd.MultiIndex.from_frame(df[keys]))]
+        df = pd.concat([kept, df], ignore_index=True)
+    write_parquet_meta(df, {**meta, "budgets": [budget]}, path)
 
 
 def load_experiment(case_dir, kind):
@@ -82,6 +92,24 @@ def load_experiment(case_dir, kind):
         frames.append(df)
         budgets.extend(meta["budgets"])
     return pd.concat(frames, ignore_index=True), {**meta, "budgets": sorted(set(budgets))}
+
+
+def experiment_meta(case_dir, kind):
+    """An experiment's metadata alone, read from the shard schemas without the sample rows."""
+    metas = [json.loads(pq.read_schema(s).metadata[b"run_meta"])
+             for s in sorted(experiment_dir(case_dir, kind).glob("b*.parquet"))]
+    return {**metas[-1], "budgets": sorted({b for m in metas for b in m["budgets"]})}
+
+
+def load_experiment_rows(case_dir, kind, row_filter):
+    """Rows of an experiment matching a pyarrow row filter, read across every shard.
+
+    The filter is pushed into the parquet scan, so rows the caller would drop are never
+    materialized as pandas objects; use this instead of masking load_experiment's frame
+    when a consumer needs a small slice of a large sweep.  Metadata is the caller's job
+    via experiment_meta, since a filtered read says nothing about what the sweep covered."""
+    shards = sorted(experiment_dir(case_dir, kind).glob("b*.parquet"))
+    return pads.dataset(shards).to_table(filter=row_filter).to_pandas()
 
 
 class Problem:
@@ -159,15 +187,20 @@ class Problem:
         return table, list(mu.columns)
 
 
+DESCRIPTOR_COLUMNS = {"n_on", "driver"}   # per-config labels in the cache, not targets
+
+
 class TargetProblem(Problem):
     """Problem backed by a common target_cache.parquet (build_target_cache.py).
 
     One cache holds every case in the same schema (max_mu, sum_mu, one_mu, one_lmp,
-    n_on, max_mu_single), so the runner swaps case, guiding target, and nominal law
-    without touching any sampler.  self.S is the chosen guiding target; self.targets
+    n_on, max_mu_single, driver), so the runner swaps case, guiding target, and nominal
+    law without touching any sampler.  self.S is the chosen guiding target; self.targets
     keeps all of them (full-nconf, 0 on missing/infeasible ids) so run_experiments can
-    score any target from the same weighted sample.  A missing-data target (all-NaN
-    column, e.g. one_lmp with no cached LMP) is excluded from self.available.
+    score any target from the same weighted sample.  The cache's descriptor columns --
+    n_on and the string `driver` naming the element that attains max_mu -- are not target
+    functions and are excluded.  A missing-data target (all-NaN column, e.g. one_lmp with
+    no cached LMP) is excluded from self.available.
     """
 
     def __init__(self, target_cache, target="max_mu", dist=None, sensitivity=None):
@@ -179,7 +212,8 @@ class TargetProblem(Problem):
         self.nconf = 1 << self.ngen
         self._powers = (1 << np.arange(self.ngen - 1, -1, -1)).astype(np.int64)  # MSB-first
         self.dist = dist if dist is not None else default_mrf(self.ngen)
-        self.targets = {c: self._to_full(df[c]) for c in df.columns if c != "n_on"}
+        self.targets = {c: self._to_full(df[c])
+                        for c in df.columns if c not in DESCRIPTOR_COLUMNS}
         self.available = {c for c in self.targets if df[c].notna().any()}
         self.S = self.targets[target]
         self.proxy = sensitivity

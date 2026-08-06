@@ -7,7 +7,7 @@ through here rather than building a path relative to its own location.
 
 from pathlib import Path
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 ERCOT_DATA = REPO_ROOT / "data" / "ercot"
 RESULTS = REPO_ROOT / "results"
 

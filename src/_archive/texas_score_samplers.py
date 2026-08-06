@@ -10,7 +10,7 @@ nominal law is the real per-generator Bernoulli (each queue candidate online wit
 calibrated p), which is a zero-coupling MRF so `MarkovRandomField` is reused directly.
 
 Usage:
-    HARNESS_CASE=2025 uv run python -m texas.score_samplers
+    HARNESS_CASE=2025 uv run python -m src.texas.score_samplers
 """
 
 import json

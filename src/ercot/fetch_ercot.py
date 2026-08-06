@@ -27,7 +27,7 @@ import pandas as pd
 
 from gridstatus.ercot_api.ercot_api import ErcotAPI
 
-from ercot.data_paths import ERCOT_DATA
+from src.ercot.data_paths import ERCOT_DATA
 
 TOKEN_PATH = os.path.expanduser("~/.ercot_token.json")
 OUT_DIR = str(ERCOT_DATA)

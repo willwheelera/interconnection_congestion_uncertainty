@@ -23,15 +23,21 @@ Hyperparameters are keyword args on `sample`, set by the runner (run_experiments
     gamma       tempering of mode weights, omega ~ nominal(mode)**gamma
                 (gamma<1 keeps the rarest, deepest modes sampled for tail coverage)
 
+beta trades variance against tail reach: a large beta caps the weights tightly but spends
+most of the sample on plain nominal draws, a small beta leans on the modes and admits
+weights up to 1/beta.  The runner sweeps it (run_experiments.BETAS) and records each value
+as its own method, so the trade is read off the figures rather than assumed.
+
 Usage (standalone, vs the other samplers):
-    uv run python -m sampling.run_experiments
+    uv run python -m src.sampling.run_experiments
 """
 
 import numpy as np
 
-from utils.availability import get_all_neighbors
+from src.utils.availability import get_all_neighbors
 
 ASCENT_FRAC = 0.4   # default fraction of budget spent discovering modes by ascent
+BETA = 0.2          # default weight of the defensive nominal component
 
 
 def step_candidates(problem, cur, move, score_lookup):
@@ -95,7 +101,7 @@ def mixture_logpmf_terms(bits, R):
     return bits @ lr.T + (1 - bits) @ l1r.T
 
 
-def sample_mixture(problem, R, omega, n, rng, beta=0.2):
+def sample_mixture(problem, R, omega, n, rng, beta=BETA):
     """Draw n configs from beta*nominal + (1-beta)*sum_m omega_m Bern(R_m)."""
     comp = rng.random(n) >= beta                       # True -> a mode component
     out = problem.draw_nominal(n, rng)
@@ -106,7 +112,7 @@ def sample_mixture(problem, R, omega, n, rng, beta=0.2):
     return out
 
 
-def mixture_logpmf(problem, bits, R, omega, beta=0.2):
+def mixture_logpmf(problem, bits, R, omega, beta=BETA):
     """log q(x) for the full defensive mixture."""
     log_nom = problem.log_nominal_pmf(bits)
     mode_terms = mixture_logpmf_terms(bits, R) + np.log(omega)[None, :]
@@ -120,7 +126,7 @@ def _logsumexp(a, axis):
     return (m + np.log(np.exp(a - m).sum(axis=axis, keepdims=True))).squeeze(axis)
 
 
-def sample(problem, ev, rng, budget, ascent_frac=ASCENT_FRAC, eps=0.1, beta=0.2, gamma=0.3,
+def sample(problem, ev, rng, budget, ascent_frac=ASCENT_FRAC, eps=0.1, beta=BETA, gamma=0.3,
            move="all", score_lookup=None):
     """Ascent-seeded defensive-IS weighted sample (ids, weights) at the call budget.
 

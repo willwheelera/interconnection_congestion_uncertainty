@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 DEFAULT_CASE = REPO_ROOT / "data" / "case14_gen_per_bus.json"
 
 

@@ -270,7 +270,7 @@ def plot_sensitivity(result_sets: list[dict], out_path: Path) -> None:
     print(f"Figure saved to {out_path}")
 
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results"
 
 
@@ -289,7 +289,7 @@ def main():
     out_path = in_path.with_suffix(".pdf")
 
     if not in_path.exists():
-        import sensitivity.barrier
+        import src.sensitivity.barrier
         solution_path = RESULTS_DIR / args.dir / f"opf_{args.dir}_avail{args.ID}.json.gz"
         print(f"{in_path.name} not found; running sensitivity analysis on {solution_path.name}...")
         sensitivity_analysis.run(solution_path)

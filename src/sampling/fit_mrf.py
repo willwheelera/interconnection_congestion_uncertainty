@@ -5,7 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import scipy.optimize
 
-from utils.solution_io import load_dual_cache
+from src.utils.solution_io import load_dual_cache
 
 
 NGEN = 14
@@ -14,7 +14,7 @@ BERNOULLI_PARAMETERS = np.full(NGEN, P_BERNOULLI)
 LOGP = np.log(BERNOULLI_PARAMETERS)
 LOGQ = np.log(1 - BERNOULLI_PARAMETERS)
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 
 def run():
     lmp_df, mu_df = load_dual_cache(REPO_ROOT / "results" / "case14_gen_per_bus")

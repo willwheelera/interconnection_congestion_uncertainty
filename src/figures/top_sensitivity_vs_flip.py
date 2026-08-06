@@ -35,11 +35,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from utils.availability import id_to_avail, avail_to_id, get_all_neighbors
-from utils.solution_io import load_gen_bus_map
-from figures.sensitivity_vs_flip import report_metrics, collect_points_all
+from src.utils.availability import id_to_avail, avail_to_id, get_all_neighbors
+from src.utils.solution_io import load_gen_bus_map
+from src.figures.sensitivity_vs_flip import report_metrics, collect_points_all
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results" / "case14_gen_per_bus"
 CASE_PATH = REPO_ROOT / "data" / "case14_gen_per_bus.json"
 NGEN = 14

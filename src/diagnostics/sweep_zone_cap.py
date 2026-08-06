@@ -41,13 +41,13 @@ import pyomo.environ as pyo
 from egret.data.model_data import ModelData
 from egret.models.scopf import create_scopf_model
 
-from paths import DATA
+from src.paths import DATA
 
-from cases import registry
-from model.relief import (add_queue_generators, add_lostload_generators_ordc,
+from src.cases import registry
+from src.model.relief import (add_queue_generators, add_lostload_generators_ordc,
                                   scale_loads_by_zone, scale_renewables_by_snapshot)
-from model.soft_limits import enable_soft_limits, thermal_violations
-from cases.texas.build_load_snapshots import ZONES
+from src.model.soft_limits import enable_soft_limits, thermal_violations
+from src.cases.texas.build_load_snapshots import ZONES
 from egret.models.dcopf import _lazy_ptdf_dcopf_model_solve_loop
 from egret.common.solver_interface import _solve_model
 

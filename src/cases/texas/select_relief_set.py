@@ -15,8 +15,8 @@ slack and is flagged there for a full-relief recheck. This validation bounds how
 that will happen.
 
 Usage:
-    uv run python -m cases.texas.select_relief_set --case activsg2000_2025
-    uv run python -m cases.texas.select_relief_set --case activsg2000_2025 --collect 400 --validate 200
+    uv run python -m src.cases.texas.select_relief_set --case activsg2000_2025
+    uv run python -m src.cases.texas.select_relief_set --case activsg2000_2025 --collect 400 --validate 200
 """
 
 import argparse
@@ -26,9 +26,9 @@ from collections import defaultdict
 import numpy as np
 import pyomo.environ as pyo
 
-from cases import registry
-from model.scdcopf import build_persistent
-from model.soft_limits import thermal_violations
+from src.cases import registry
+from src.model.scdcopf import build_persistent
+from src.model.soft_limits import thermal_violations
 
 SHED_TOL_MW = 0.05      # a relief generator counts as active above this shed
 DS_TOL = 1.0            # $/MWh; |S_full - S_slim| below this is numerical noise

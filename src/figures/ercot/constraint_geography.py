@@ -18,10 +18,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from ercot.constraint_geography import (ZONE_ORDER, attach_geography,
+from src.ercot.constraint_geography import (ZONE_ORDER, attach_geography,
                                   load_tail_constraints)
 
-from ercot.data_paths import RESULTS as OUT_DIR
+from src.ercot.data_paths import RESULTS as OUT_DIR
 ZONE_COLORS = {
     "FarWest": "#8c1d40", "West": "#e0611a", "North": "#c9a227",
     "NorthCentral": "#4c9f38", "SouthCentral": "#1f8a8a",

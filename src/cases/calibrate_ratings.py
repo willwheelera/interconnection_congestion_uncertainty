@@ -22,17 +22,17 @@ Ratings are rewritten in place in data/<case>.json, which makes the pass idempot
 case that is already secure is left untouched.
 
 Usage:
-    uv run python -m cases.calibrate_ratings
-    uv run python -m cases.calibrate_ratings --case case118_queue --rounds 40
+    uv run python -m src.cases.calibrate_ratings
+    uv run python -m src.cases.calibrate_ratings --case case118_queue --rounds 40
 """
 
 import argparse
 import json
 from pathlib import Path
 
-from cases import registry
-from model import evaluator
-from model.scdcopf import scalar_target
+from src.cases import registry
+from src.model import evaluator
+from src.model.scdcopf import scalar_target
 
 RELAX_STEP = 1.10       # rating multiplier applied to a line each round
 SECURE_FRAC = 0.05      # all-off congestion allowed to remain, as a fraction of the cap

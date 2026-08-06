@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from paths import REPO_ROOT
-from ercot.fetch_ercot import build_client
+from src.paths import REPO_ROOT
+from src.ercot.fetch_ercot import build_client
 
 SNAPSHOTS = REPO_ROOT / "data" / "activsg2000_load_snapshots.csv"
 OUT = REPO_ROOT / "data" / "activsg2000_renewable_snapshots.csv"

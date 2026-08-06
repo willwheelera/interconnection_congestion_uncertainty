@@ -8,9 +8,9 @@ Direct draws are target-independent, so only the nominal law (dist) and budget s
 sample.
 
 Usage:
-    uv run python -m figures.tail.direct_inverse_cdf --case case14_gen_per_bus
-    uv run python -m figures.tail.direct_inverse_cdf --case case14_gen_per_bus \
-        --dist bernoulli --budget 640 --n-reps 8
+    uv run python -m src.figures.tail.direct_inverse_cdf --case case14_gen_per_bus
+    uv run python -m src.figures.tail.direct_inverse_cdf --case case14_gen_per_bus \
+        --dists bernoulli,mrf_a --budget 640 --n-reps 8
 """
 
 import argparse
@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-from sampling.problem import TargetProblem, case_tag
-from sampling.distributions import make_dist
-from figures.tail.per_line_survivor import weighted_survivor, decimate_monotone, line_order
-from figures.tail.inverse_cdf import COLORS
-from figures.tail.direct_common import load_direct_context
+from src.sampling.problem import TargetProblem, CASES, case_tag
+from src.sampling.distributions import case_dist
+from src.figures.tail.per_line_survivor import weighted_survivor, decimate_monotone, line_order
+from src.figures.style import COLORS
+from src.figures.tail.direct_common import load_direct_context
 
 FIG_W = 6.0                     # single figure width, fits the text block of a two-column page
 
@@ -87,20 +87,9 @@ def panel(ax, line_idx, line_name, mu, truth_w, reps_samples, rep_ids):
     ax.set_title(f"line {line_name}", y=0.82, fontsize=6)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="case14_gen_per_bus")
-    parser.add_argument("--dist", default="bernoulli")
-    parser.add_argument("--budget", type=int, default=640)
-    parser.add_argument("--n-reps", type=int, default=8)
-    args = parser.parse_args()
-
-    case_dir, samples, meta, tc, ngen, p = load_direct_context(args.case)
-    problem = TargetProblem(tc, dist=make_dist(args.dist, ngen, p))
-    mu, line_names = problem.mu_table()
-
-    reps_samples = direct_rep_samples(samples, args.dist, args.budget)
-    rep_ids = [r for r in replicate_indices(meta["n_rep"], args.n_reps) if r in reps_samples]
+def plot_replicates(case, problem, mu, line_names, dist, budget, reps_samples, rep_ids,
+                    case_dir):
+    """One figure: the exact per-line survivor curve plus a few direct replicate curves."""
     idx, names = line_order(mu, line_names, problem.w)
     idx_by_name = dict(zip(names, idx))
 
@@ -111,17 +100,43 @@ def main():
     handles = [Line2D([0], [0], color="k", lw=1.5, label="exact (full enumeration)"),
                Line2D([0], [0], color=COLORS["direct"], lw=0.8,
                       label=f"direct replicates ({len(rep_ids)})")]
-    title = (f"{args.case}: per-line direct vs exact  |  {args.dist}, "
-             f"budget {args.budget}, {len(rep_ids)} reps")
+    title = (f"{case}: per-line direct vs exact  |  {dist}, "
+             f"budget {budget}, {len(rep_ids)} reps")
     fig, axs = survivor_grid(names, draw, handles, title, r"congestion threshold $\hat{\mu}$",
                              r"$P[\,|\mu_l| > \hat{\mu}\,]$")
     axs[0, 0].set_ylim(1e-4, 1.5)
     axs[0, 0].set_xlim(-mu.max() * 0.02, mu.max() * 1.02)
     axs[0, 0].set_yticks([10.0 ** -n for n in [1, 2, 3, 4]])
 
-    out = case_dir / f"direct_per_line_inverse_cdf_{args.dist}_b{args.budget}_{case_tag(args.case)}.pdf"
+    out = case_dir / f"direct_per_line_inverse_cdf_{dist}_b{budget}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
+    return fig
+
+
+def run(case, dists, budget=640, n_reps=8):
+    """One direct-vs-exact figure per nominal law; returns them in the given order."""
+    case_dir, samples, meta, tc, ngen, p = load_direct_context(case)
+    figs = []
+    for dist in dists:
+        problem = TargetProblem(tc, dist=case_dist(CASES[case], dist))
+        mu, line_names = problem.mu_table()
+        reps_samples = direct_rep_samples(samples, dist, budget)
+        rep_ids = [r for r in replicate_indices(meta["n_rep"], n_reps) if r in reps_samples]
+        figs.append(plot_replicates(case, problem, mu, line_names, dist, budget,
+                                    reps_samples, rep_ids, case_dir))
+    return figs
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--case", default="case14_gen_per_bus")
+    parser.add_argument("--dists", default="bernoulli")
+    parser.add_argument("--budget", type=int, default=640)
+    parser.add_argument("--n-reps", type=int, default=8)
+    args = parser.parse_args()
+
+    run(args.case, args.dists.split(","), args.budget, args.n_reps)
     plt.show()
 
 

@@ -44,6 +44,7 @@ The primary quantity of interest is the **sensitivity of congestion dual variabl
 - **Temporary Snippets**: When running code via `python3 -c`, `bash -c`, or similar inline execution commands, **NEVER include comments**. 
 - **Permanent Files**: When writing code to actual files (e.g., `src/`, `tests/`, `config/`), include concise comments and explanations as normal.
 - **Distinction**: Comments are forbidden only in transient, inline code blocks passed directly to shell interpreters.   
+- **Large output**: For large machine-generated output (caches, full sweeps, tables over ~100 rows), write results to a file and read the specific values needed. Do not print the artifact into context. Short output — tracebacks, solve logs, small tables — should be read in full.
 
 ### Writing style
 
@@ -54,6 +55,10 @@ Avoid non-standard compound words in writing. Examples include (do not use these
 - copperplate
 
 Variable and function names in code are not restricted.
+
+State what was and wasn't verified as a fact: "I did not run this," "untested," "read the code, did not execute it." Do not hedge the claim itself to signal uncertainty.
+
+Default to under ten sentences when explaining a result. Expand only when asked.
 
 ### LaTeX coding style:
 - Each sentence is on its own line.

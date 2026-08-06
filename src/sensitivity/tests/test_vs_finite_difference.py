@@ -42,16 +42,16 @@ import numpy as np
 from egret.data.model_data import ModelData
 from egret.models.dcopf import solve_dcopf
 
-from sensitivity.barrier import (
+from src.sensitivity.barrier import (
 
     _network_state,
     _compute_mu_base,
     _read_pf_dual_dict,
     compute_sensitivity_barrier,
 )
-from model.dcopf import store_branch_duals
-from utils.solution_io import get_lmps
-from sensitivity.finite_difference import _inject_at_bus
+from src.model.dcopf import store_branch_duals
+from src.utils.solution_io import get_lmps
+from src.sensitivity.finite_difference import _inject_at_bus
 
 
 def _solve_with_duals(md: ModelData, solver: str = "gurobi") -> ModelData:
@@ -62,7 +62,7 @@ def _solve_with_duals(md: ModelData, solver: str = "gurobi") -> ModelData:
     store_branch_duals(m, md_sol)
     return md_sol
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 DEFAULT_CASE = REPO_ROOT / "data/case14_gen_per_bus.json"
 DEFAULT_DELTA = 1.0   # MW — comparable to eps so FD spans the barrier smoothing region
 DEFAULT_ATOL  = 0.05  # $/MWh per MW — accommodates O(eps) barrier smoothing at eps=1

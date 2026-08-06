@@ -27,11 +27,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
+from src.ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
 
-from ercot.data_paths import ERCOT_DATA as DATA_DIR
+from src.ercot.data_paths import ERCOT_DATA as DATA_DIR
 SAMPLE_DAYS_CSV = DATA_DIR / "sample_days.csv"
-from ercot.data_paths import RESULTS as OUT_DIR
+from src.ercot.data_paths import RESULTS as OUT_DIR
 BIN = "5min"
 REGIME_COLORS = {"base": "tab:blue", "mixed": "tab:purple", "contingency": "tab:red"}
 

@@ -20,8 +20,8 @@ import logging
 import multiprocessing as mp
 from collections import defaultdict
 
-from model.scdcopf import build_persistent, scalar_target  # noqa: F401  (re-exported)
-from model.soft_limits import thermal_violations
+from src.model.scdcopf import build_persistent, scalar_target  # noqa: F401  (re-exported)
+from src.model.soft_limits import thermal_violations
 
 
 def _worker(case, snapshot, screened, threads, task_q, result_q):

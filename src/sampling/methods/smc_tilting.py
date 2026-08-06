@@ -21,7 +21,7 @@ only on each particle's S, the temperature ladder, and the estimated Z-ratios, a
 that covers the full curve from one population.
 
 Usage (vs the other samplers):
-    uv run python -m sampling.run_experiments
+    uv run python -m src.sampling.run_experiments
 """
 
 import numpy as np

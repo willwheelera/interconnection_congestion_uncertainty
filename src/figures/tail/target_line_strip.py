@@ -4,8 +4,9 @@ The per-line strip figure (plot_line_exceed_strip.py) faceted over every line at
 this one keeps only the `one_mu` line -- the one the target was built from -- and spends
 the panels on the nominal law instead, so the four config distributions sit side by side
 for that single line.  Each panel plots the raw per-replicate estimate of
-P[|mu_l| > c] as jittered points, hue = sampler (direct included), against the exact
-nominal-weighted truth (dashed).
+P[|mu_l| > c] as jittered points, hue = sampler (direct and ascent-IS at beta 0.2 by
+default; --methods selects others, see figures.style), against the exact nominal-weighted
+truth (dashed).
 
 The threshold c defaults to the mu level that line exceeds with probability --at, computed
 exactly from the enumeration, so the same command works across cases whose mu scales
@@ -16,14 +17,14 @@ on its own c, and c is reported in the panel title -- unless --threshold pins on
 target_line_strip() takes every option as a plain python argument, so the figure can be
 built from a session or another script without going through the command line:
 
-    from figures.tail.target_line_strip import target_line_strip
+    from src.figures.tail.target_line_strip import target_line_strip
     fig, specs, out = target_line_strip("case30_gen_per_bus", at=1e-3)
     fig, specs, _ = target_line_strip("activsg2000_original_v12", budgets=[2560], save=False)
 
 main() only parses the equivalent command line and hands off to it:
 
-    uv run python -m figures.tail.target_line_strip --case case14_gen_per_bus
-    uv run python -m figures.tail.target_line_strip --case activsg2000_original_v12 \
+    uv run python -m src.figures.tail.target_line_strip --case case14_gen_per_bus
+    uv run python -m src.figures.tail.target_line_strip --case activsg2000_original_v12 \
         --at 1e-4 --targets one_mu,max_mu
 """
 
@@ -38,11 +39,12 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, SymmetricalLogLocator
 
-from sampling.problem import (TargetProblem, REPO_ROOT, CASES, case_tag,
+from src.sampling.problem import (TargetProblem, REPO_ROOT, CASES, case_tag,
                                           experiment_dir, read_parquet_meta)
-from sampling.distributions import make_dist, DIST_NAMES
-from figures.tail.inverse_cdf import COLORS, LABELS
-from figures.tail.line_exceed_strip import DIST_LABEL, METHOD_ORDER, fmt_one_sigfig
+from src.sampling.distributions import case_dist, DIST_NAMES, DIST_LABEL
+from src.figures.style import (DEFAULT_METHODS, method_color, method_label, select_methods,
+                           series_tag, add_method_args, method_selection)
+from src.figures.tail.line_exceed_strip import fmt_one_sigfig
 
 KEYS = ["dist", "target", "budget", "method", "ascent_move", "rep"]
 DEFAULT_CASE = "case14_gen_per_bus"
@@ -70,7 +72,7 @@ def build_problem(case, case_dir):
     tc = case_dir / "target_cache.parquet"
     ngen = int(read_parquet_meta(tc)[1]["ngen"])
     p = CASES[case].nominal_p()
-    return TargetProblem(tc, target="one_mu", dist=make_dist("bernoulli", ngen, p))
+    return TargetProblem(tc, target="one_mu", dist=case_dist(CASES[case], "bernoulli"))
 
 
 def level_at(mu_l, w, prob):
@@ -142,17 +144,20 @@ def figure(frame, dists, specs, xorder, method_order, palette, title, xlabel):
         ax.set_visible(False)
 
     handles = [Line2D([0], [0], marker="o", ls="", ms=2.6, color=palette[m],
-                      label=LABELS.get(m, m)) for m in method_order]
+                      label=method_label(m)) for m in method_order]
     handles.append(Line2D([0], [0], color="k", ls="--", lw=0.9, label="exact truth"))
-    # legend under the grid in two rows: a single row of seven entries needs more than the
-    # 3.4 in the whole figure is allowed, and the panels themselves have no spare room
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.005), ncol=4,
-               frameon=False, fontsize=5.5, handletextpad=0.3, columnspacing=1.0,
+    # legend under the grid, three entries per row -- what the beta-annotated sampler labels
+    # fit in at 3.0 in wide -- with the band under the panels sized to the rows it takes,
+    # so the default two-sampler selection does not leave the gap a full selection needs
+    rows = int(np.ceil(len(handles) / 3))
+    top_of_legend = 0.01 + 0.036 * rows
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.005), ncol=3,
+               frameon=False, fontsize=5.0, handletextpad=0.3, columnspacing=1.0,
                labelspacing=0.25)
     fig.suptitle(title, y=0.985, fontsize=7)
-    fig.supxlabel(xlabel, fontsize=6.5, y=0.115)
+    fig.supxlabel(xlabel, fontsize=6.5, y=top_of_legend + 0.02)
     fig.supylabel(r"$\hat{P}[\,|\mu_l| > c\,]$", fontsize=6.5, x=0.015)
-    fig.subplots_adjust(left=0.145, right=0.985, bottom=0.185, top=0.895,
+    fig.subplots_adjust(left=0.145, right=0.985, bottom=top_of_legend + 0.075, top=0.895,
                         wspace=0.10, hspace=0.30)
     return fig
 
@@ -168,20 +173,21 @@ def panel_specs(case, case_dir, dists, mu_l, at, fixed=None):
     p = CASES[case].nominal_p()
     out = {}
     for dist in dists:
-        prob = TargetProblem(tc, target="one_mu", dist=make_dist(dist, ngen, p))
+        prob = TargetProblem(tc, target="one_mu", dist=case_dist(CASES[case], dist))
         c = fixed or level_at(mu_l, prob.w, at)
         out[dist] = (c, float(prob.w[mu_l > c].sum()))
     return out
 
 
-def output_path(case_dir, case, threshold, at):
+def output_path(case_dir, case, threshold, at, methods):
     """Destination pdf, keyed on the pinned c when there is one and on --at otherwise."""
     tag = f"c{threshold:.6g}" if threshold else f"at{at:g}"
-    return case_dir / f"target_line_strip_{case_tag(case)}_{tag}.pdf"
+    return case_dir / f"target_line_strip_{case_tag(case)}_{tag}{series_tag(methods)}.pdf"
 
 
 def target_line_strip(case=DEFAULT_CASE, dists=DIST_NAMES, targets=("one_mu",),
-                      budgets=None, threshold=None, at=1e-2, save=True):
+                      budgets=None, threshold=None, at=1e-2, save=True,
+                      methods=DEFAULT_METHODS):
     """Build (and by default save) the nominal-law strip figure for one case.
 
     The whole plot is reachable from python with these arguments -- no command line needed:
@@ -206,14 +212,15 @@ def target_line_strip(case=DEFAULT_CASE, dists=DIST_NAMES, targets=("one_mu",),
 
     xorder = ([str(b) for b in budgets] if one_target
               else [f"{t}\n{b}" for t in targets for b in budgets])
-    method_order = [m for m in METHOD_ORDER if m in frame["method"].unique()]
-    palette = {m: COLORS.get(m, "gray") for m in method_order}
+    method_order = select_methods(frame["method"].unique(), methods)
+    palette = {m: method_color(m) for m in method_order}
+    frame = frame[frame["method"].isin(method_order)]
     title = (f"{case_tag(case)}, line {problem.meta['one_mu_element']}, "
              f"{meta['n_rep']} reps per cell")
     xlabel = "sampling budget" if one_target else "importance target / sampling budget"
 
     fig = figure(frame, dists, specs, xorder, method_order, palette, title, xlabel)
-    out = output_path(case_dir, case, threshold, at) if save else None
+    out = output_path(case_dir, case, threshold, at, methods) if save else None
     if out:
         fig.savefig(out)
     return fig, specs, out
@@ -227,12 +234,13 @@ def main():
     parser.add_argument("--budgets", default=None)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--at", type=float, default=1e-2)
+    add_method_args(parser)
     args = parser.parse_args()
 
     _, specs, out = target_line_strip(
         case=args.case, dists=args.dists.split(","), targets=args.targets.split(","),
         budgets=args.budgets.split(",") if args.budgets else None,
-        threshold=args.threshold, at=args.at)
+        threshold=args.threshold, at=args.at, methods=method_selection(args))
     print(f"saved -> {out}  (" +
           ", ".join(f"{d} c={c:.6g} truth={t:.3e}" for d, (c, t) in specs.items()) + ")")
     plt.show()

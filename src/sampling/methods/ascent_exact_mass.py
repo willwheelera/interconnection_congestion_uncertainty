@@ -20,12 +20,12 @@ while the heavy, high-S explored configs --- the dominant variance contributors 
 are counted at their true weight instead of being estimated.
 
 Usage (vs the other samplers):
-    uv run python -m sampling.run_experiments
+    uv run python -m src.sampling.run_experiments
 """
 
 import numpy as np
 
-import sampling.methods.ascent_importance_sampling as ais
+import src.sampling.methods.ascent_importance_sampling as ais
 
 
 def sample(problem, ev, rng, budget, move="all", score_lookup=None):

@@ -14,9 +14,9 @@ so the per-line truth matches the aggregates the existing target_cache and
 experiment_samples were scored against.
 
 Usage:
-    uv run python -m sweeps.build_dual_cache --case all
-    uv run python -m sweeps.build_dual_cache --case activsg2000_2025 --top 25
-    uv run python -m sweeps.build_dual_cache --case activsg2000_original --threshold 10
+    uv run python -m src.sweeps.build_dual_cache --case all
+    uv run python -m src.sweeps.build_dual_cache --case activsg2000_2025 --top 25
+    uv run python -m src.sweeps.build_dual_cache --case activsg2000_original --threshold 10
 """
 
 import argparse
@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cases import registry
+from src.cases import registry
 
 
 def constraint_global_max(parts):

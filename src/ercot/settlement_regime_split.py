@@ -25,11 +25,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
+from src.ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
 
-from ercot.data_paths import ERCOT_DATA as DATA_DIR
+from src.ercot.data_paths import ERCOT_DATA as DATA_DIR
 SAMPLE_DAYS_CSV = DATA_DIR / "sample_days.csv"
-from ercot.data_paths import RESULTS as OUT_DIR
+from src.ercot.data_paths import RESULTS as OUT_DIR
 BIN = "15min"
 BIND = 50.0   # $/MWh shadow price above which a regime counts as binding
 DISP = 50.0   # $/MWh settled spread above which an interval is "congested"

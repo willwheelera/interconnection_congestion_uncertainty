@@ -19,7 +19,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 from pathlib import Path
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS = REPO_ROOT / "results"
 
 CASE30 = RESULTS / "case30_gen_per_bus/dual_cache.parquet"

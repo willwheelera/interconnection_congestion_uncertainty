@@ -26,8 +26,8 @@ with a different generator, so re-running here will not reproduce them exactly -
 a Texas case only when you mean to replace its set.
 
 Usage:
-    uv run python -m cases.screen_contingencies --case case118_queue --n-stress 32
-    uv run python -m cases.screen_contingencies --case all --workers 16
+    uv run python -m src.cases.screen_contingencies --case case118_queue --n-stress 32
+    uv run python -m src.cases.screen_contingencies --case all --workers 16
 """
 
 import argparse
@@ -35,8 +35,8 @@ import json
 
 import numpy as np
 
-from cases import registry
-from model import evaluator
+from src.cases import registry
+from src.model import evaluator
 
 
 def stress_configs(ngen, n_stress, seed):

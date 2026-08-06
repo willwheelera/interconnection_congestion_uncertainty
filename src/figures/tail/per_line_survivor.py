@@ -3,8 +3,9 @@
 Driven by the unified experiment matrix.  The guiding target S(x) is only the sampling
 driver; what we care about are the per-line distributions.  For one fixed (dist, target,
 snapshot, budget) slice this reads the raw weighted samples (experiment_samples.parquet
-from run_experiments.py) and draws a grid with one subplot per line -- every sampler's
-weighted survivor curve proportion(|mu_l| > mu_hat), pooled over replicates, against the
+from run_experiments.py) and draws a grid with one subplot per line -- each selected
+sampler's weighted survivor curve proportion(|mu_l| > mu_hat) (`direct` and ascent-IS at
+beta 0.2 by default; --methods selects, see figures.style), pooled over replicates, against the
 exact nominal-weighted truth (full enumeration).  A good sampler tracks the black truth
 into the congested tail.  One figure per slice; main loops the requested dist x target x
 budget slices, writing one PDF each.  The replicate-bootstrap helpers (rep_numerators,
@@ -17,24 +18,22 @@ with a 45-degree identity line.  Points off the diagonal at large |mu| show a sa
 recovers the wrong tail value (or never reaches it), complementing the survivor overlay.
 
 Usage:
-    uv run python -m figures.tail.per_line_survivor --case case14_gen_per_bus \
-        --dist bernoulli --target max_mu --budget 640
-    uv run python -m figures.tail.per_line_survivor --case case14_gen_per_bus  # all slices
-    uv run python -m figures.tail.per_line_survivor --case case14_gen_per_bus --kind qq
+    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus \
+        --dists bernoulli --targets max_mu --budgets 640
+    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus  # every law
+    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus --kind qq
 """
 
 import argparse
-import json
 
 import numpy as np
 import matplotlib.pyplot as plt
-import pyarrow.parquet as pq
 
-from sampling.problem import TargetProblem, REPO_ROOT, load_experiment, CASES, case_tag
-from sampling.distributions import DIST_NAMES, make_dist
-from figures.tail.inverse_cdf import COLORS, MOVE_STYLE, series_label
+from src.sampling.problem import TargetProblem, REPO_ROOT, load_experiment, CASES, case_tag
+from src.sampling.distributions import DIST_NAMES, DIST_LABEL, case_dist
+from src.figures.style import (DEFAULT_METHODS, MOVE_STYLE, method_color, series_label,
+                           select_methods, series_tag, add_method_args, method_selection)
 
-DIST_LABEL = {"bernoulli": "Bernoulli", "mrf_a": "MRF-A", "mrf_b": "MRF-B", "mrf_c": "MRF-C"}
 BOOT_PCT = 95 #  bootstrap interval
 _BOOT_PCT = (50 - BOOT_PCT / 2, 50 + BOOT_PCT / 2)
 N_BOOT = 400
@@ -111,7 +110,7 @@ def panel(ax, line_idx, line_name, mu, truth_w, slice_samples):
     for (method, move), g in slice_samples.groupby(["method", "ascent_move"], sort=True):
         ids, w = g["id"].to_numpy(), g["weight"].to_numpy()
         v, s = decimate_monotone(*weighted_survivor(mu[ids, line_idx], w))
-        ax.plot(v, s, color=COLORS.get(method, "gray"), lw=1.1,
+        ax.plot(v, s, color=method_color(method), lw=1.1,
                 linestyle=MOVE_STYLE[move], label=series_label(method, move), rasterized=True)
     ax.set_title(f"line {line_name}", y=0.80, x=0.5, fontsize=8)
 
@@ -162,7 +161,7 @@ def qq_panel(ax, line_idx, line_name, mu, truth_w, slice_samples, probs):
     for (method, move), g in slice_samples.groupby(["method", "ascent_move"], sort=True):
         ids, w = g["id"].to_numpy(), g["weight"].to_numpy()
         qs = weighted_quantiles(mu[ids, line_idx], w, probs)
-        ax.plot(qt, qs, color=COLORS.get(method, "gray"), lw=1.0,
+        ax.plot(qt, qs, color=method_color(method), lw=1.0,
                 linestyle=MOVE_STYLE[move], label=series_label(method, move), rasterized=True)
         hi = max(hi, qs.max())
     mumax = mu.max()
@@ -196,46 +195,55 @@ def qq_figure_for_slice(mu, line_names, truth_w, slice_samples, title, probs=QQ_
     return fig
 
 
+def run(case, dists, targets=None, budgets=None, snapshot="multi", kind="survivor",
+        methods=DEFAULT_METHODS):
+    """One figure per (dist, target, budget) slice present in the experiment; returns them.
+
+    A slice the experiment never ran is skipped rather than drawn empty."""
+    case_dir = REPO_ROOT / "results" / case
+    samples, meta = load_experiment(case_dir, "samples")
+    samples = samples[samples["method"].isin(
+        select_methods(samples["method"].unique(), methods))]
+    problems = {d: TargetProblem(case_dir / "target_cache.parquet",
+                                 dist=case_dist(CASES[case], d)) for d in dists}
+    mu, line_names = next(iter(problems.values())).mu_table()
+    budgets = budgets or meta["budgets"]
+
+    make_fig = qq_figure_for_slice if kind == "qq" else figure_for_slice
+    stem = "per_line_qq" if kind == "qq" else "per_line_survivor"
+    grouped = samples.groupby(["dist", "target", "snapshot", "budget"], sort=False)
+    figs = []
+    for dist in dists:
+        for target in targets:
+            for budget in budgets:
+                key = (dist, target, snapshot, budget)
+                if key not in grouped.groups:
+                    continue
+                title = (f"{case}: per-line tail  |  {DIST_LABEL[dist]}, guide={target}, "
+                         f"budget {budget}, {meta['n_rep']} reps")
+                fig = make_fig(mu, line_names, problems[dist].w, grouped.get_group(key), title)
+                out = (case_dir / f"{stem}_{dist}_{target}_{snapshot}_b{budget}"
+                                  f"{series_tag(methods)}_{case_tag(case)}.pdf")
+                fig.savefig(out)
+                print(f"saved -> {out}")
+                figs.append(fig)
+    return figs
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="case14_gen_per_bus")
+    parser.add_argument("--case", default="activsg2000_original_v12")
     parser.add_argument("--dists", default=",".join(DIST_NAMES))
-    parser.add_argument("--targets", default="max_mu,sum_mu")
+    parser.add_argument("--targets", default="max_mu")
     parser.add_argument("--snapshot", default="multi")
     parser.add_argument("--budgets", default=None)
     parser.add_argument("--kind", default="survivor", choices=["survivor", "qq"])
+    add_method_args(parser)
     args = parser.parse_args()
 
-    case_dir = REPO_ROOT / "results" / args.case
-    samples, meta = load_experiment(case_dir, "samples")
-    tc = case_dir / "target_cache.parquet"
-    ngen = int(json.loads(pq.read_schema(tc).metadata[b"run_meta"])["ngen"])
-    p = CASES[args.case].nominal_p()
-
-    problems = {d: TargetProblem(tc, dist=make_dist(d, ngen, p)) for d in args.dists.split(",")}
-    mu, line_names = next(iter(problems.values())).mu_table()
-    budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else meta["budgets"]
-
-    make_fig = qq_figure_for_slice if args.kind == "qq" else figure_for_slice
-    stem = "per_line_qq" if args.kind == "qq" else "per_line_survivor"
-    grouped = samples.groupby(["dist", "target", "snapshot", "budget"], sort=False)
-    for dist in args.dists.split(","):
-        for target in args.targets.split(","):
-            for budget in budgets:
-                key = (dist, target, args.snapshot, budget)
-                if key not in grouped.groups:
-                    continue
-                sl = grouped.get_group(key)
-                title = (f"{args.case}: per-line tail  |  {DIST_LABEL[dist]}, guide={target}, "
-                         f"budget {budget}, {meta['n_rep']} reps")
-                fig = make_fig(mu, line_names, problems[dist].w, sl, title)
-                out = case_dir / f"{stem}_{dist}_{target}_{args.snapshot}_b{budget}_{case_tag(args.case)}.pdf"
-                fig.savefig(out)
-                print(f"saved -> {out}")
-                #plt.close(fig)
-                break
-            break
-        break
+    budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else None
+    run(args.case, args.dists.split(","), args.targets.split(","), budgets,
+        args.snapshot, args.kind, method_selection(args))
     plt.show()
 
 

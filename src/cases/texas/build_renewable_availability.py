@@ -26,9 +26,9 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 
-from cases.texas.compile_resource_additions import CDR, fuel_group, read_table
+from src.cases.texas.compile_resource_additions import CDR, fuel_group, read_table
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RENEWABLES = REPO_ROOT / "data" / "activsg2000_renewable_snapshots.csv"
 COLLECTION = REPO_ROOT / "data" / "activsg2000_load_collection.json"
 

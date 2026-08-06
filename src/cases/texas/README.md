@@ -21,25 +21,25 @@ The physical model and the recipe they are solved under are documented in
 
 ```bash
 # network
-uv run python -m cases.texas.convert_model              # MATPOWER + .aux -> data/activsg2000.json
-uv run python -m cases.texas.compile_resource_additions # ERCOT CDR unit tables -> additions CSV
-uv run python -m cases.texas.add_cdr_resources          # -> data/activsg2000_2025.json
+uv run python -m src.cases.texas.convert_model              # MATPOWER + .aux -> data/activsg2000.json
+uv run python -m src.cases.texas.compile_resource_additions # ERCOT CDR unit tables -> additions CSV
+uv run python -m src.cases.texas.add_cdr_resources          # -> data/activsg2000_2025.json
 
 # load and renewable snapshots (needs an ERCOT token)
 source gridstatus_api_key.sh                            # see src/ercot/ercot_auth.py
-uv run python -m cases.texas.fetch_load_snapshots --n 8
-uv run python -m cases.texas.build_load_snapshots       # -> data/activsg2000_load_collection.json
-uv run python -m cases.texas.fetch_renewable_snapshots
-uv run python -m cases.texas.build_renewable_availability   # per-fuel capacity factor per snapshot
+uv run python -m src.cases.texas.fetch_load_snapshots --n 8
+uv run python -m src.cases.texas.build_load_snapshots       # -> data/activsg2000_load_collection.json
+uv run python -m src.cases.texas.fetch_renewable_snapshots
+uv run python -m src.cases.texas.build_renewable_availability   # per-fuel capacity factor per snapshot
 
 # queue
-uv run python -m cases.texas.build_queue_distribution   # -> data/activsg2000_queue20.json
+uv run python -m src.cases.texas.build_queue_distribution   # -> data/activsg2000_queue20.json
 
 # contingency screening, at the recipe the sweep solves
-uv run python -m cases.screen_contingencies --case activsg2000_2025
+uv run python -m src.cases.screen_contingencies --case activsg2000_2025
 
 # slim nodal relief set (see src/model/README.md)
-uv run python -m cases.texas.select_relief_set --case activsg2000_2025
+uv run python -m src.cases.texas.select_relief_set --case activsg2000_2025
 ```
 
 Then `sweeps.enumerate_configs` for the ground truth; see `src/README.md`.

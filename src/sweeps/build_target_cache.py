@@ -28,8 +28,8 @@ Which ingest a case takes, where its raw caches are, and which element is its `o
 all come off its registry record -- this file holds no case table of its own.
 
 Usage:
-    uv run python -m sweeps.build_target_cache --case case14_gen_per_bus
-    uv run python -m sweeps.build_target_cache --case all
+    uv run python -m src.sweeps.build_target_cache --case case14_gen_per_bus
+    uv run python -m src.sweeps.build_target_cache --case all
 """
 
 import argparse
@@ -40,8 +40,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cases import registry
-from sampling.problem import write_parquet_meta
+from src.cases import registry
+from src.sampling.problem import write_parquet_meta
 
 COLUMNS = ["max_mu", "sum_mu", "one_mu", "one_lmp", "n_on", "max_mu_single", "driver"]
 

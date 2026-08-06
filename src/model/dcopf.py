@@ -28,13 +28,13 @@ from egret.data.model_data import ModelData
 from egret.models.dcopf import create_btheta_dcopf_model, solve_dcopf
 from egret.common.solver_interface import _solve_model
 
-from utils.availability import avail_to_id, id_to_avail, remove_unavailable_generators
-from utils.modify_network import scale_load
+from src.utils.availability import avail_to_id, id_to_avail, remove_unavailable_generators
+from src.utils.modify_network import scale_load
 import logging
 logging.getLogger('egret').setLevel(logging.WARNING)
 logging.getLogger('pyomo.core').addFilter(lambda r: getattr(r, 'id', None) != 'W1002')
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results"
 DEFAULT_CASE = REPO_ROOT / "data" / "case30_gen_per_bus.json"
 

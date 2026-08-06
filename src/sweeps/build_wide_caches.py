@@ -51,11 +51,11 @@ import pyarrow.parquet as pq
 
 from egret.data.model_data import ModelData
 
-from sensitivity.barrier import compute_sensitivity_barrier, _natkey
-from utils.solution_io import _row_id_from_stem, _solution_files
+from src.sensitivity.barrier import compute_sensitivity_barrier, _natkey
+from src.utils.solution_io import _row_id_from_stem, _solution_files
 
 EPS_MU, EPS_X = 1.0, 1.0
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 DEFAULT_DIR = REPO_ROOT / "results" / "case30_gen_per_bus"
 BATCH_ROWS = 5000
 MAP_CHUNK = 256

@@ -14,10 +14,24 @@ barrier solves (slower; run separately).  Proxy-ranked ascent moves (best / top5
 only where a proxy is available (the generic gen-per-bus cases); elsewhere ascent uses
 the all-neighbor move.
 
+The swept laws default to every law build_laws.py stores, structured ones included; a case
+with no queue has no technology groups, so its structured laws are skipped.  Sweeping a
+subset of the laws, or of the ascent-IS defensive weights, rewrites only those rows in each
+budget shard, so a sweep can be extended without redoing the rest.
+
+Ascent-IS is run at the defensive weights `--betas`, each written as its own method
+(`ascent_is_b0.5`), so the betas are separate series in every downstream frame and figure.
+The default is the single weight the figures draw; passing more compares them at the cost
+of one ascent-IS run each.
+
 Usage:
-    uv run python -m sampling.run_experiments --case case14_gen_per_bus
-    uv run python -m sampling.run_experiments --case case30_gen_per_bus --proxy live
-    uv run python -m sampling.run_experiments --case all --n-rep 40 --budgets 640,2560
+    uv run python -m src.sampling.run_experiments --case case14_gen_per_bus
+    uv run python -m src.sampling.run_experiments --case case30_gen_per_bus --proxy live
+    uv run python -m src.sampling.run_experiments --case all --n-rep 40 --budgets 640,2560
+    uv run python -m src.sampling.run_experiments --case activsg2000_original_v12 \
+        --dists mrf_cobuild,mrf_substitute --budgets 640,2560,10240
+    uv run python -m src.sampling.run_experiments --case activsg2000_original_v12 \
+        --betas 0.2,0.5,0.8
 """
 
 import argparse
@@ -26,16 +40,17 @@ import functools
 import numpy as np
 import pandas as pd
 
-import sampling.methods.subset_simulation as ss
-import sampling.methods.smc_tilting as smc
-import sampling.methods.ascent_importance_sampling as ais
-import sampling.methods.ascent_exact_mass as exact
-import sampling.methods.cross_entropy as ce
-from cases import registry
-from sampling.problem import TargetProblem, write_experiment_shard, experiment_dir
-from sampling.distributions import DIST_NAMES, make_dist
+import src.sampling.methods.subset_simulation as ss
+import src.sampling.methods.smc_tilting as smc
+import src.sampling.methods.ascent_importance_sampling as ais
+import src.sampling.methods.ascent_exact_mass as exact
+import src.sampling.methods.cross_entropy as ce
+from src.cases import registry
+from src.sampling.problem import TargetProblem, write_experiment_shard, experiment_dir
+from src.sampling.distributions import COUPLED_NAMES, DIST_NAMES, case_dist
 
 PROBS = np.array([1e-2, 1e-3, 1e-4])                     # fixed tail points reported per cell
+BETAS = [0.2]               # ascent-IS defensive weights, each run as its own method
 
 
 def direct(problem, ev, rng, budget):
@@ -45,24 +60,44 @@ def direct(problem, ev, rng, budget):
     return ids, np.full(len(ids), 1.0 / len(ids))
 
 
-def build_samplers(dist_name, proxy):
+def ais_name(beta):
+    """Method key of the ascent-IS sampler at one defensive weight, e.g. ascent_is_b0.5.
+
+    Beta is part of the key, not a separate column, so the betas read as distinct methods
+    everywhere downstream: they get their own rows, labels, colors, and shard entries."""
+    return f"ascent_is_b{beta:g}"
+
+
+def build_samplers(dist_name, proxy, betas=BETAS):
     """The sampler set for one cell, keyed by (method, ascent_move).
 
-    The three base samplers and the two ascent samplers always run; ascent gets the
-    proxy moves (best/top5) only when a proxy exists; cross-entropy only under a
-    Bernoulli law (it fits a product proposal).
+    The three base samplers and the two ascent samplers always run; ascent-IS runs once per
+    defensive weight in `betas`; ascent gets the proxy moves (best/top5) only when a proxy
+    exists; cross-entropy only under a Bernoulli law (it fits a product proposal).
     """
     samplers = {("direct", "na"): direct,
                 ("subset_sim", "na"): ss.sample,
                 ("smc_tilt", "na"): smc.sample}
     moves = ["all", "best", "top5"] if proxy is not None else ["all"]
-    for name, fn in [("ascent_is", ais.sample), ("ascent_exact", exact.sample)]:
-        for m in moves:
-            lookup = proxy.score if m != "all" else None
-            samplers[(name, m)] = functools.partial(fn, move=m, score_lookup=lookup)
+    for m in moves:
+        lookup = proxy.score if m != "all" else None
+        for beta in betas:
+            samplers[(ais_name(beta), m)] = functools.partial(
+                ais.sample, move=m, score_lookup=lookup, beta=beta)
+        samplers[("ascent_exact", m)] = functools.partial(
+            exact.sample, move=m, score_lookup=lookup)
     if dist_name == "bernoulli":
         samplers[("cross_entropy", "na")] = ce.sample
     return samplers
+
+
+def case_laws(case, names):
+    """The requested nominal laws a case actually has, in the order given.
+
+    The structured laws couple within technology groups, so they exist only for the cases
+    with a queue to read fuels from (the same rule build_laws.py stores them under)."""
+    groups = case.candidate_groups()
+    return [n for n in names if groups is not None or n not in COUPLED_NAMES]
 
 
 def target_specs(problem):
@@ -104,24 +139,26 @@ def score_cell(problem, samples, dims):
     return pd.concat(rows, ignore_index=True)
 
 
-def run_case(case, proxy_kind, n_rep, budgets, seed0=0):
+def run_case(case, proxy_kind, n_rep, budgets, dists, betas=BETAS, seed0=0):
     """Sweep the whole matrix for one case; write one parquet shard per budget.
 
     Each budget's curves and samples go to their own shard under experiment_curves/ and
     experiment_samples/, so rerunning over a different budget set adds shards instead of
-    overwriting an earlier run.  The plotting side recombines the shards on read."""
-    from sensitivity.proxy import make_proxy   # defers egret/pyomo to run time
+    overwriting an earlier run, and rerunning a subset of the laws or of the samplers (a
+    fresh beta, say) replaces only those rows.  The plotting side recombines the shards on
+    read."""
+    from src.sensitivity.proxy import make_proxy   # defers egret/pyomo to run time
     name, tc, ngen = case.name, case.target_cache, case.ngen
     p = case.nominal_p()
-    base = TargetProblem(tc, "max_mu", dist=make_dist("bernoulli", ngen, p))
+    base = TargetProblem(tc, "max_mu", dist=case_dist(case, "bernoulli"))
     specs = target_specs(base)
     proxy = make_proxy(proxy_kind if case.proxy else None, name, ngen)
 
     curves = {b: [] for b in budgets}
     samples = {b: [] for b in budgets}
-    for dist_name in DIST_NAMES:
-        dist = make_dist(dist_name, ngen, p)
-        samplers = build_samplers(dist_name, proxy)
+    for dist_name in case_laws(case, dists):
+        dist = case_dist(case, dist_name)
+        samplers = build_samplers(dist_name, proxy, betas)
         for snapshot, label, col in specs:
             problem = TargetProblem(tc, target=col, dist=dist, sensitivity=proxy)
             for budget in budgets:
@@ -134,7 +171,7 @@ def run_case(case, proxy_kind, n_rep, budgets, seed0=0):
                       f"({len(samplers)} samplers x {n_rep} reps)")
 
     meta = dict(case=name, n_rep=n_rep, budgets=list(budgets), proxy=proxy_kind,
-                nconf=base.nconf, proxy_available=proxy is not None,
+                betas=list(betas), nconf=base.nconf, proxy_available=proxy is not None,
                 one_mu_element=base.meta["one_mu_element"],
                 one_lmp_element=base.meta["one_lmp_element"])
     case_dir = case.results_dir
@@ -153,11 +190,15 @@ def main():
     parser.add_argument("--proxy", default="cached", choices=["cached", "live"])
     parser.add_argument("--n-rep", type=int, default=40)
     parser.add_argument("--budgets", default="640,2560")
+    parser.add_argument("--dists", default=",".join(DIST_NAMES + COUPLED_NAMES))
+    parser.add_argument("--betas", default=",".join(f"{b:g}" for b in BETAS))
     args = parser.parse_args()
     budgets = [int(b) for b in args.budgets.split(",")]
+    dists = args.dists.split(",")
+    betas = [float(b) for b in args.betas.split(",")]
     for case in registry.resolve(args.case):
         print(f"=== {case.name} (proxy={args.proxy}) ===")
-        run_case(case, args.proxy, args.n_rep, budgets)
+        run_case(case, args.proxy, args.n_rep, budgets, dists, betas)
 
 
 if __name__ == "__main__":

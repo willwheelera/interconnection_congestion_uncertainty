@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ercot.data_paths import SHADOW_PRICES as DATA_PATH
+from src.ercot.data_paths import SHADOW_PRICES as DATA_PATH
 TAIL = 300.0  # $/MWh; a binding contingency interval above this is a tail event
 
 # ERCOT weather zones, ordered roughly west -> east for plotting.

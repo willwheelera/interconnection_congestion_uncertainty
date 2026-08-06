@@ -13,48 +13,54 @@ quantity sampling recovers -- across the case matrix:
 The target family and its parameter come from the command line: `mean` (E[mu], the default),
 `quantile <q>` (the weighted q-quantile of mu), or `exceed <thr>` (P[mu > thr]).
 
-**Result.** Raw proximity partly orders case30 (Spearman -0.78) but the PTDF-sensitivity
-descriptors add nothing (sigma Spearman ~0), and the combined linear fit's respectable-looking
-R^2 of 0.53 collapses to 0.06 once the single highest-mu line is removed -- the whole fit is one
-leverage point.  On the redispatch-driven case14 every descriptor and their combination fail
-(slack +0.36, wrong sign; combined R^2 0.13).  The two Texas fleets then show that *which*
-descriptor works is not a property of the descriptor at all: on the 2025 fleet it is proximity,
-as on case30 (slack -0.71, sigma -0.25, combined rank-R^2 0.52 of which slack alone is 0.51),
-while on the 2016 fleet the ordering inverts (sigma -0.75 carries it, slack falls to -0.41, z
-comes out wrong-signed at +0.17, combined rank-R^2 0.64 against slack alone at 0.17).  Same
-network, same queue, same recipe -- only the incumbent fleet differs, and the descriptor that
-ranks congestion swaps.
+**Result** (at the modal base, on E[mu]).  Raw proximity partly orders case30 (Spearman -0.78)
+but the PTDF-sensitivity descriptors add nothing (sigma Spearman -0.06), and the combined linear
+fit's respectable-looking R^2 of 0.53 collapses to 0.06 once the single highest-mu line is
+removed -- the whole fit is one leverage point.  On the redispatch-driven case14 every descriptor
+and their combination fail (slack +0.36, wrong sign; combined R^2 0.13).  The two Texas fleets
+then show that *which* descriptor works is not a property of the descriptor at all: on the 2016
+fleet sigma carries the ordering (-0.75) while slack falls to -0.37 and z comes out wrong-signed
+at +0.20, so the combined rank-R^2 of 0.62 stands against slack alone at 0.14; on the 2025 fleet
+the two are comparable and both weak (slack -0.38, sigma -0.43, combined rank-R^2 0.33).  Same
+network, same queue, same recipe -- only the incumbent fleet differs, and the weight the ranking
+puts on each descriptor moves with it.
 
-Neither Texas fleet gives magnitude: raw R^2 0.15 (2025) and 0.31 (2016), and unlike case30
-neither is one leverage point (0.17 and 0.35 with the top constraint dropped) -- they are simply
+Neither Texas fleet gives magnitude: raw R^2 0.09 (2025) and 0.29 (2016), and unlike case30
+neither is one leverage point (0.13 and 0.33 with the top constraint dropped) -- they are simply
 low.  So the descriptors give a coarse who-is-near-the-limit ordering, by a rule that cannot be
 chosen in advance, and nothing about how large mu gets: sampling captures combinatorial
 active-set structure a single configuration cannot see.
 
-**Base configuration.** All-generators-on for the gen-per-bus cases, which have no incumbent
-fleet (with every generator off there is only load shed, so no flow to measure).  The
-incumbent-fleet cases use the queue-empty grid instead: E[candidates online] is 5.4 of 20 on
-Texas, putting all-on far outside the nominal mass.  This matters for slack -- 2025 fleet
-Spearman -0.71 off the queue-empty grid against -0.63 off all-on, 2016 fleet -0.41 against
--0.13 -- and not at all for sigma, which is -0.75 on the 2016 fleet at every base configuration
-because it is a property of the network and the candidate capacities rather than of the dispatch.
+**Base configuration.** The descriptors are read off one configuration, and the default is the
+most probable one under the case's nominal law (`descriptors.compute`), which is the only choice
+that does not put the base outside the mass the target averages over.  It costs the gen-per-bus
+cases nothing -- their law has no queue and favors availability, so its mode is all-on, the
+configuration they were always read at -- and it replaces the queue-empty grid on the
+incumbent-fleet cases, where 5 of 20 candidates clear.  On the 2016 fleet that choice moves slack
+(-0.37 modal, -0.41 queue-empty, -0.13 all-on) and leaves sigma at -0.75 everywhere, since sigma
+is a property of the network and the candidate capacities rather than of the dispatch; on the
+2025 fleet, whose queue barely moves the network state, modal and queue-empty agree to two
+decimals on every descriptor while all-on still costs slack (-0.24).  So the modal base never
+loses to the queue-empty one by more than rounding, and both beat the corner the earlier
+gen-per-bus reading would have suggested.
 
 This file computes; `figures.descriptors` draws.
 
 Usage:
-    uv run python -m figures.descriptors                # mean, the default
-    uv run python -m figures.descriptors quantile 0.95
-    uv run python -m figures.descriptors exceed 200
+    uv run python -m src.figures.descriptors                # mean, the default
+    uv run python -m src.figures.descriptors quantile 0.95
+    uv run python -m src.figures.descriptors exceed 200
+    uv run python -m src.figures.descriptors --base on
 """
 
 from collections import namedtuple
 
 import numpy as np
 
-from cases import registry
-from descriptors.compute import descriptors
-from sampling.distributions import make_dist
-from sampling.problem import Problem
+from src.cases import registry
+from src.descriptors.compute import DEFAULT_BASE, descriptors
+from src.sampling.distributions import nominal_law
+from src.sampling.problem import Problem
 
 # The cases the study reports on, with the congestion regime each one turned out to show.
 # The regime label is a finding about the case, not a property of it, so it lives here
@@ -104,18 +110,6 @@ def parse_target(argv):
     return TARGET_FAMILIES[family](argv[1:])
 
 
-def nominal_law(case):
-    """The case's nominal law: its calibrated queue marginals, or the samplers' default.
-
-    A case with no queue file gets None, which leaves Problem on the shared default law the
-    samplers are scored under.
-    """
-    if case.candidates_file is None:
-        return None
-    p = case.build_p()
-    return make_dist("bernoulli", len(p), p)
-
-
 def load_target(case, keys, target):
     """The selected nominal-weighted per-element target statistic (what sampling recovers)."""
     prob = Problem(case.results_dir, dist=nominal_law(case))
@@ -140,10 +134,10 @@ def r2_no_top(X, y, top):
     return ols_r2(X[keep], y[keep])[0]
 
 
-def compute_case(name, target):
+def compute_case(name, target, base=DEFAULT_BASE):
     """Descriptors, the sampled target, binding mask, leverage index, and predictors."""
     case = registry.get(name)
-    d = descriptors(case)
+    d = descriptors(case, base)
     y = load_target(case, list(d.index), target)
     binding = d.mu_base.values > 1e-6
     top = int(y.argmax())
@@ -151,6 +145,6 @@ def compute_case(name, target):
     return d, y, binding, top, X
 
 
-def compute_all(target):
-    """Every study case's computed row, keyed by case name."""
-    return {name: compute_case(name, target) for name, _ in STUDY_CASES}
+def compute_all(target, base=DEFAULT_BASE):
+    """Every study case's computed row at one base configuration, keyed by case name."""
+    return {name: compute_case(name, target, base) for name, _ in STUDY_CASES}

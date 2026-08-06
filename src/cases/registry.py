@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 DATA = REPO_ROOT / "data"
 RESULTS = REPO_ROOT / "results"
 
@@ -208,6 +208,18 @@ class Case:
                         "name": c.get("name")})
         return out
 
+    def candidate_groups(self) -> list[list[int]] | None:
+        """Candidate indices grouped by fuel -- the blocks the coupled laws couple within.
+
+        None when the case has no queue, which `make_dist` reads as a single block.
+        """
+        if self.candidates_file is None:
+            return None
+        groups: dict = {}
+        for i, c in enumerate(self.candidates()):
+            groups.setdefault(c["fuel"], []).append(i)
+        return list(groups.values())
+
     def build_p(self) -> np.ndarray:
         """Per-candidate build probability as a length-ngen vector, for drawing configs."""
         if self.candidates_file is None:
@@ -249,6 +261,18 @@ def _texas(name, one_mu, case_file, **paths) -> Case:
                        "snapshots": _TX_SNAPSHOTS, **paths})
 
 
+def _leveraged(tag) -> Case:
+    """One activsg2000_original_v12 variant differing only in which queue sits on top.
+
+    Same network, fleet, snapshots, and relief set as v12, so the sweeps compare
+    directly; `one_mu` is unset because the most congested element is not known until
+    the case is swept.
+    """
+    return _texas(f"activsg2000_v12_{tag}", None, DATA / "activsg2000.json",
+                  candidates=DATA / f"activsg2000_queue20_{tag}.json",
+                  relief=DATA / "activsg2000_original_v12_relief_set.json")
+
+
 def _ieee(name, network, ngen, one_mu) -> Case:
     return Case(name=name, family="ieee_queue", model="scdcopf", ngen=ngen,
                 ingest="long", parallel="config", one_mu=one_mu,
@@ -282,6 +306,13 @@ CASES: dict[str, Case] = {
         "activsg2000_2025", "ctg:464:461", DATA / "activsg2000_2025.json"),
     "activsg2000_original_v12": _texas(
         "activsg2000_original_v12", "ctg:68:18", DATA / "activsg2000.json"),
+
+    # Leveraged-queue variants of v12, drawn by cases.texas.build_leveraged_queue: the
+    # candidates sit only at buses with shift-factor leverage on a priced constraint,
+    # five independent draws (lev0-4) plus the same draws with three nearby projects
+    # aggregated into one candidate (lev0a3-4a3).  Everything except the queue is v12's.
+    **{f"activsg2000_v12_{tag}": _leveraged(tag)
+       for i in range(5) for tag in (f"lev{i}", f"lev{i}a3")},
 
     # Incumbent-fleet IEEE queue testbeds: the network's own generators stay online and
     # a queue is added on top, under the same recipe as Texas so the five cases are

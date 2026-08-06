@@ -33,10 +33,10 @@ from egret.model_library.defn import BasePointType
 from egret.models.dcopf import _lazy_ptdf_dcopf_model_solve_loop
 from egret.models.scopf import create_scopf_model
 
-from model.relief import (add_lostload_generators_ordc, add_queue_generators,
+from src.model.relief import (add_lostload_generators_ordc, add_queue_generators,
                           scale_loads_by_zone, scale_renewables_by_snapshot,
                           set_emergency_factor)
-from model.soft_limits import enable_soft_limits
+from src.model.soft_limits import enable_soft_limits
 
 # Post-contingency overflow (per unit) above which a dropped contingency counts as
 # violated at the screened optimum -- about 0.01 MW on a 100 MVA base.

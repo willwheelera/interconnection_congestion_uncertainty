@@ -35,9 +35,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
+from src.ercot.shadow_prices import SHADOW_PRICES as DATA_PATH, load_shadow_prices
 
-from ercot.data_paths import RESULTS as OUT_DIR
+from src.ercot.data_paths import RESULTS as OUT_DIR
 TAIL = 300.0  # $/MWh; a binding interval above this counts as a tail event
 TOP_N = 15
 TYPE_COLORS = {"S": "tab:blue", "D": "tab:red", "M": "tab:green",

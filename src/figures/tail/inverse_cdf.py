@@ -1,15 +1,21 @@
 """Inverse-CDF (threshold-probability) plot for one slice of the experiment matrix.
 
 Reads a case's experiment_curves.parquet (run_experiments.py) and, for one fixed
-(dist, target, snapshot, budget) slice, overlays every sampler's estimated exceedance
-curve P[target >= b] -- median with a 10-90 band over replicates -- against the exact
-enumerated truth (black).  Ascent move strategies share the sampler's color and differ
-by line style, so all/best/top5 read as one family.
+(dist, target, snapshot, budget) slice, overlays the selected samplers' estimated
+exceedance curve P[target >= b] -- median with a 10-90 band over replicates -- against the
+exact enumerated truth (black).  Ascent move strategies share the sampler's color and
+differ by line style, so all/best/top5 read as one family; the ascent-IS defensive weights
+are separate series in one green ramp.
+
+By default this draws `direct` and ascent-IS at beta 0.2; every other sampler is in the
+frame and comes back with --methods (see figures.style).
 
 Usage:
-    uv run python -m figures.tail.inverse_cdf --case case14_gen_per_bus
-    uv run python -m figures.tail.inverse_cdf --case case14_gen_per_bus \
+    uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus
+    uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus \
         --dist mrf_b --target sum_mu --budget 640
+    uv run python -m src.figures.tail.inverse_cdf --case activsg2000_original_v12 \
+        --methods direct,ascent_is
 """
 
 import argparse
@@ -17,11 +23,15 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sampling.problem import REPO_ROOT, load_experiment, case_tag
-from figures.style import COLORS, LABELS, band
+from src.sampling.problem import REPO_ROOT, load_experiment, case_tag
+from src.figures.style import (MOVE_STYLE, band, method_color, series_label, select_methods,
+                           series_tag, add_method_args, method_selection)
 
-COLORS = {**COLORS, "cross_entropy": "tab:brown", "truth": "k"}
-MOVE_STYLE = {"na": "-", "all": "-", "best": ":", "top5": "--"}
+
+def select_series(series, methods):
+    """Keep only the series whose method is in the requested selection."""
+    keep = set(select_methods({m for m, _ in series}, methods))
+    return {key: est for key, est in series.items() if key[0] in keep}
 
 
 def load_slice(case_dir, sel):
@@ -39,11 +49,6 @@ def load_slice(case_dir, sel):
     return thresholds, truth, series, meta
 
 
-def series_label(method, move):
-    """Sampler label, annotated with the ascent move when it is not the default."""
-    return LABELS.get(method, method) + ("" if move == "na" else f" ({move})")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", default="case14_gen_per_bus")
@@ -51,17 +56,20 @@ def main():
     parser.add_argument("--target", default="max_mu")
     parser.add_argument("--snapshot", default="multi")
     parser.add_argument("--budget", type=int, default=None)
+    add_method_args(parser)
     args = parser.parse_args()
+    methods = method_selection(args)
 
     case_dir = REPO_ROOT / "results" / args.case
     budget = args.budget or load_experiment(case_dir, "curves")[1]["budgets"][0]
     sel = dict(dist=args.dist, target=args.target, snapshot=args.snapshot, budget=budget)
     b, truth, series, meta = load_slice(case_dir, sel)
+    series = select_series(series, methods)
 
     fig, ax = plt.subplots(figsize=(7.5, 5.2))
     ax.plot(b, truth, "k-", lw=2.5, label="exact (full enumeration)")
     for (method, move), est in series.items():
-        band(ax, b, est, COLORS.get(method, "gray"), series_label(method, move))
+        band(ax, b, est, method_color(method), series_label(method, move))
         ax.lines[-1].set_linestyle(MOVE_STYLE[move])
 
     ax.set_yscale("log")
@@ -73,7 +81,8 @@ def main():
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
-    out = case_dir / f"inverse_cdf_{args.dist}_{args.target}_{args.snapshot}_b{budget}_{case_tag(args.case)}.pdf"
+    out = (case_dir / f"inverse_cdf_{args.dist}_{args.target}_{args.snapshot}_b{budget}"
+                      f"{series_tag(methods)}_{case_tag(args.case)}.pdf")
     fig.savefig(out)
     print(f"saved -> {out}")
     plt.show()

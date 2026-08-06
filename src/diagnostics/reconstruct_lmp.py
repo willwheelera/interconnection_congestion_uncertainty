@@ -14,7 +14,7 @@ uniform per-bus offset (it cancels out of any spatial spread) and is not in the 
 cache. All spread statistics (range, std, max abs) are invariant to it.
 
 Usage:
-    uv run python -m diagnostics.reconstruct_lmp --case activsg2000_2025
+    uv run python -m src.diagnostics.reconstruct_lmp --case activsg2000_2025
 """
 
 import argparse
@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 from egret.data.model_data import ModelData
 
-from cases import registry
-from model.scdcopf import build_audit_ptdf
+from src.cases import registry
+from src.model.scdcopf import build_audit_ptdf
 
 CHUNK = 20000
 

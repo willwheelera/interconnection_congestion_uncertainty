@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy.stats import gaussian_kde
-from utils.solution_io import load_dual_cache
+from src.utils.solution_io import load_dual_cache
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results"
 OUT_DIR = RESULTS_DIR
 

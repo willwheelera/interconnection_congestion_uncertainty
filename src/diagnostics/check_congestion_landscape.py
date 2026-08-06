@@ -20,9 +20,9 @@ from pathlib import Path
 import numpy as np
 
 from egret.data.model_data import ModelData
-import model.dcopf as so
+import src.model.dcopf as so
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 CASE_PATH = REPO_ROOT / "data" / "case30_gen_per_bus.json"
 SOLVER = "highs"
 MU_TOL = 1e-3

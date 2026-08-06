@@ -35,10 +35,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from utils.availability import id_to_avail, avail_to_id
-from utils.solution_io import load_gen_bus_map
+from src.utils.availability import id_to_avail, avail_to_id
+from src.utils.solution_io import load_gen_bus_map
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results" / "case14_gen_per_bus"
 CASE_PATH = REPO_ROOT / "data" / "case14_gen_per_bus.json"
 NGEN = 14

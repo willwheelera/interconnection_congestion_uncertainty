@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from ercot.data_paths import ERCOT_DATA
+from src.ercot.data_paths import ERCOT_DATA
 OUT = ERCOT_DATA / "real_lmp_time_average.parquet"
 
 

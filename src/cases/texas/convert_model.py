@@ -23,7 +23,7 @@ from pathlib import Path
 import networkx as nx
 from egret.parsers.matpower_parser import create_ModelData
 
-from paths import REPO_ROOT
+from src.paths import REPO_ROOT
 MODEL_DIR = REPO_ROOT / "texas_model" / "ACTIVSg2000"
 CASE_M = MODEL_DIR / "case_ACTIVSg2000.m"
 AUX = MODEL_DIR / "ACTIVSg2000.aux"

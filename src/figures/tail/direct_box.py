@@ -1,4 +1,4 @@
-"""Per-line box-and-whisker of the direct-sampling tail statistics, both at once.
+"""Per-line box-and-whisker of the direct-sampling tail statistics.
 
 Two companion plots to plot_line_exceed_strip.py, sharing its per-line panel layout
 (congested lines first, one figure per nominal law, a direct box per sampling-budget cell,
@@ -13,8 +13,8 @@ near-binding dust is floored to 0 so a line that congests less than 1-q of the t
 a clean 0 rather than 1e-8 noise.
 
 Usage:
-    uv run python -m figures.tail.direct_box --case case14_gen_per_bus
-    uv run python -m figures.tail.direct_box --case case14_gen_per_bus \
+    uv run python -m src.figures.tail.direct_box --case case14_gen_per_bus
+    uv run python -m src.figures.tail.direct_box --case case14_gen_per_bus \
         --threshold 100 --quantile 0.99 --budgets 640,2560
 """
 
@@ -24,18 +24,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sampling.problem import TargetProblem, case_tag
-from sampling.distributions import make_dist
-from figures.tail.line_exceed_strip import truth_probabilities, DIST_LABEL
-from figures.tail.direct_common import (load_direct_context, panel_grid,
+from src.sampling.problem import TargetProblem, CASES, case_tag
+from src.sampling.distributions import case_dist, DIST_LABEL
+from src.figures.tail.line_exceed_strip import truth_probabilities
+from src.figures.tail.direct_common import (load_direct_context, direct_slice, panel_grid,
                                               box_legend, box_draw)
 
 
 def direct_exceed_frame(samples, mu, line_names, dist, budgets, threshold, target="max_mu"):
     """Long per-(budget, rep, line) direct estimate of P[|mu_l| > threshold]."""
-    sl = samples[(samples.method == "direct") & (samples.dist == dist)
-                 & (samples.target == target) & (samples.snapshot == "multi")
-                 & samples.budget.isin(budgets)]
+    sl = direct_slice(samples, dist, budgets, target)
     rows = []
     for (budget, rep), g in sl.groupby(["budget", "rep"], sort=True):
         w, ids = g["weight"].to_numpy(), g["id"].to_numpy()
@@ -62,9 +60,7 @@ def direct_percentile_frame(samples, mu, line_names, dist, budgets, q, target="m
 
     Direct draws carry uniform weight, so the weighted quantile is the plain empirical
     quantile of the drawn configs' |mu_l|."""
-    sl = samples[(samples.method == "direct") & (samples.dist == dist)
-                 & (samples.target == target) & (samples.snapshot == "multi")
-                 & samples.budget.isin(budgets)]
+    sl = direct_slice(samples, dist, budgets, target)
     rows = []
     for (budget, rep), g in sl.groupby(["budget", "rep"], sort=True):
         val = np.quantile(mu[g["id"].to_numpy()], q, axis=0)
@@ -89,6 +85,7 @@ def plot_exceed(case, samples, meta, mu, line_names, w, dist, budgets, xorder, t
     out = case_dir / f"direct_exceed_box_thr{int(threshold)}_{dist}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
+    return fig
 
 
 def plot_percentile(case, samples, meta, mu, line_names, w, dist, budgets, xorder,
@@ -108,11 +105,29 @@ def plot_percentile(case, samples, meta, mu, line_names, w, dist, budgets, xorde
     out = case_dir / f"direct_percentile_box_q{int(quantile * 100)}_{dist}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
+    return fig
+
+
+def run(case, dists, budgets=None, threshold=100.0, quantile=0.99, mu_floor=1e-2):
+    """The exceedance and percentile box figures for each nominal law; returns both, in order."""
+    case_dir, samples, meta, tc, ngen, p = load_direct_context(case)
+    budgets = budgets or meta["budgets"]
+    xorder = [str(b) for b in budgets]
+
+    figs = []
+    for dist in dists:
+        problem = TargetProblem(tc, dist=case_dist(CASES[case], dist))
+        mu, line_names = problem.mu_table()
+        figs.append(plot_exceed(case, samples, meta, mu, line_names, problem.w, dist,
+                                budgets, xorder, threshold, case_dir))
+        figs.append(plot_percentile(case, samples, meta, mu, line_names, problem.w, dist,
+                                    budgets, xorder, quantile, mu_floor, case_dir))
+    return figs
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="case14_gen_per_bus")
+    parser.add_argument("--case", default="activsg2000_original_v12")
     parser.add_argument("--dists", default="bernoulli,mrf_a,mrf_b,mrf_c")
     parser.add_argument("--budgets", default=None)
     parser.add_argument("--threshold", type=float, default=100.0)
@@ -121,17 +136,9 @@ def main():
                         help="zero |mu| below this (numerical near-binding dust, not congestion)")
     args = parser.parse_args()
 
-    case_dir, samples, meta, tc, ngen, p = load_direct_context(args.case)
-    budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else meta["budgets"]
-    xorder = [str(b) for b in budgets]
-
-    for dist in args.dists.split(","):
-        problem = TargetProblem(tc, dist=make_dist(dist, ngen, p))
-        mu, line_names = problem.mu_table()
-        plot_exceed(args.case, samples, meta, mu, line_names, problem.w, dist,
-                    budgets, xorder, args.threshold, case_dir)
-        plot_percentile(args.case, samples, meta, mu, line_names, problem.w, dist,
-                        budgets, xorder, args.quantile, args.mu_floor, case_dir)
+    budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else None
+    run(args.case, args.dists.split(","), budgets, args.threshold, args.quantile,
+        args.mu_floor)
     plt.show()
 
 

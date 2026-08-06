@@ -176,11 +176,11 @@ def _crosscheck_dcopf(avail_id):
     from egret.data.model_data import ModelData
     from egret.models.dcopf import solve_dcopf, create_ptdf_dcopf_model
 
-    from paths import REPO_ROOT as REPO
-    from model.dcopf import create_case, solve_opf, store_branch_duals
-    from sensitivity.barrier import compute_sensitivity_barrier, _read_pf_dual_dict
-    from utils.solution_io import get_lmps
-    from utils.availability import id_to_avail
+    from src.paths import REPO_ROOT as REPO
+    from src.model.dcopf import create_case, solve_opf, store_branch_duals
+    from src.sensitivity.barrier import compute_sensitivity_barrier, _read_pf_dual_dict
+    from src.utils.solution_io import get_lmps
+    from src.utils.availability import id_to_avail
 
     ref = ModelData.read(str(REPO / "data" / "case14_gen_per_bus.json"))
     ngen = len(ref.data["elements"]["generator"])

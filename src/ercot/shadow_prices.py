@@ -18,7 +18,7 @@ figures built on top live in `figures/ercot/shadow_price_distributions.py`.
 import numpy as np
 import pandas as pd
 
-from ercot.data_paths import SHADOW_PRICES  # noqa: F401  (re-exported as the default input)
+from src.ercot.data_paths import SHADOW_PRICES  # noqa: F401  (re-exported as the default input)
 
 
 def load_shadow_prices(path=SHADOW_PRICES) -> pd.DataFrame:
