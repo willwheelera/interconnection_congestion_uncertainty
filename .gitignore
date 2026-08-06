@@ -35,6 +35,9 @@ slurm/*
 # Editor swap files
 *.swp
 
+# Credentials
+gridstatus_api_key.sh
+
 # Fetched ERCOT datasets: re-downloadable via src/ercot/fetch_ercot.py
 data/ercot/
 
