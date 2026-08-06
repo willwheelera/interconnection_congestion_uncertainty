@@ -42,6 +42,17 @@ from src.model.soft_limits import enable_soft_limits
 # violated at the screened optimum -- about 0.01 MW on a 100 MVA base.
 AUDIT_TOL = 1e-4
 
+# How many violations EGRET's lazy loop may track in one pass.  Its default of 5 is wrong
+# for this recipe.  The soft thermal limits leave several monitored constraints violated at
+# the optimum on purpose -- that is what caps mu -- and those permanent violations fill the
+# store, so the loop reaches `viol_num == mon_viol_num`, reports "terminating with monitored
+# violations", and stops before it has added smaller violations on constraints not yet in
+# the model.  Measured on activsg2000_original_v12, snapshot 2025-02-19 06:00, full
+# contingency set: at 5 the solve misses contingency 457 and returns objective 1273673 with
+# sum_mu 25288; at 200 it adds it and returns 1275136 with sum_mu 28770.  The value only has
+# to exceed the number of simultaneously soft-violated constraints.
+MAX_VIOLATIONS_PER_ITERATION = 200
+
 
 def extract_mu(m, base_mva: float) -> dict[str, float]:
     """{constraint_id: mu} for every binding base and post-contingency thermal limit."""
@@ -157,6 +168,7 @@ def build_persistent(case, snapshot=None, screened=True, threads=0,
                                  buses=relief_buses)
 
     m, md_scaled = create_scopf_model(md, include_feasibility_slack=True)
+    m._ptdf_options["max_violations_per_iteration"] = MAX_VIOLATIONS_PER_ITERATION
     base_mva = md.data["system"]["baseMVA"]
     enable_soft_limits(m, recipe.shadow_price_cap, base_mva)
     m.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)

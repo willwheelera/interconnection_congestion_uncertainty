@@ -98,6 +98,20 @@ class ConfigParallel(_Pool):
         """Per config {constraint: mu}, in the order the configs were given."""
         return [r[0] for r in self.evaluate_detailed(configs)]
 
+    def audit(self, configs):
+        """Screened-out contingencies each config violates at its solved dispatch.
+
+        An empty dict means that config's screened result is provably exact.  Each
+        value is {contingency: (worst branch, |post-outage flow| pu, limit pu)}.
+        """
+        for cid, cfg in enumerate(configs):
+            self.task_q.put(("audit", cid, list(cfg)))
+        out = [None] * len(configs)
+        for _ in range(len(configs)):
+            cid, _sid, violated = self.result_q.get()
+            out[cid] = {cn: (bn, flow, lim) for cn, bn, flow, lim in violated}
+        return out
+
     def close(self):
         for _ in self.workers:
             self.task_q.put(None)

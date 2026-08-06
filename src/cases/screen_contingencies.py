@@ -15,19 +15,21 @@ the tightened factor needs.
 It is a union over the stress configurations, so a configuration outside them can bind a
 dropped contingency -- on case14_queue one configuration in 62 does, and its max mu comes
 out 2% low.  What makes the screened sweep ground truth rather than an approximation is
-`PersistentModel.audit_dropped`, reached through `evaluator.audit`: it recomputes every
-dropped contingency's post-outage flows at the solved dispatch, and an empty result proves
-the screened solution is also the full problem's solution, because adding constraints that
-are already satisfied cannot change the optimum.  Screening is what keeps a 2^20
-enumeration affordable; the audit is what makes it exact.
+`sweeps.audit_screening`, which recomputes every dropped contingency's post-outage flows at
+the solved dispatch; an empty result proves the screened solution is also the full problem's
+solution, because adding constraints that are already satisfied cannot change the optimum.
+Screening is what keeps a 2^20 enumeration affordable; the audit is what makes it exact.
+Run the audit before using a sweep -- a missed binder makes duals wrong, not imprecise.
 
 Writes `data/<case>_screened.json` (the full case with its contingency set filtered) and
 `data/<case>_contingencies_screened.json` (the kept names, the recipe screened under, and
 the stress set, so a screen is reproducible from its own record).
 
-The committed Texas screened sets predate this file and came from a 24-configuration draw
-with a different generator, so re-running here will not reproduce them exactly -- re-screen
-a Texas case only when you mean to replace its set.
+A screened record with no `emergency_factor` predates this file and was screened at the
+case JSON's native rating, not at the recipe.  `activsg2000_original_v12`'s is one, and its
+33-contingency set does not survive the audit; `activsg2000_2025`, screened here, keeps 104
+on the same network.  Re-screening replaces a set that a completed sweep depends on, so do
+it deliberately -- but a record without a recipe is not to be trusted.
 
 Usage:
     uv run python -m src.cases.screen_contingencies --case case118_queue --n-stress 32

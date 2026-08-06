@@ -6,7 +6,8 @@ Edit the settings below, then run it:
 
 Each case becomes a chain of Slurm jobs:
 
-    select_relief_set  ->  screen_contingencies  ->  sweep (array of SHARDS) x LINKS
+    select_relief_set -> screen_contingencies -> sweep (array of SHARDS) x LINKS
+                                                     -> build_target_cache -> audit_screening
 
 A preparation step is submitted only when its output file is missing, and the sweep
 waits on whichever steps were needed.  Both preparation steps depend on the queue, so a
@@ -14,7 +15,14 @@ new queue gets its own relief set and its own screened contingency set rather th
 inheriting another case's.
 
 The sweep skips chunks that are already cached, so a job stopped at the walltime is
-continued by the next link, and a case whose enumeration is complete is not submitted.
+continued by the next link, and a case whose enumeration is already complete gets only
+the reduction and the audit.
+
+The chain ends with the audit, because the sweep solves the screened contingency set and
+that set is verified after the fact rather than trusted: `audit_screening` re-solves a
+selection of configurations and checks every dropped contingency at the solved dispatch.
+Read its output before using the sweep -- a screened set that misses a binder produces
+duals that are wrong, not merely imprecise.
 """
 
 import math
@@ -41,6 +49,10 @@ LINKS = 2                 # chained sweep jobs per case, each continuing the las
 SWEEP_TIME = "30:00:00"   # per link; must be under the partition's cap
 RELIEF_TIME = "12:00:00"  # select_relief_set solves ~6400 configs serially
 SCREEN_TIME = "4:00:00"   # screen_contingencies solves 34 stress configs, full N-1 set
+AUDIT_TIME = "12:00:00"   # the audit re-solves and checks every dropped contingency
+
+AUDIT_TOP = 100           # audit the configurations of largest max_mu ...
+AUDIT_RANDOM = 400        # ... and this many uniform draws standing for the rest
 
 SCREENED = True           # solve the screened N-1 set, then audit it after the sweep
 DRY_RUN = False           # True prints the sbatch commands instead of submitting
@@ -134,6 +146,19 @@ def submit_sweep(case, depend):
                         SWEEP_TIME, depend=depend, kind=kind,
                         array=f"0-{SHARDS - 1}", args=SWEEP_ARGS)
         kind = "afterany"
+    return depend
+
+
+def submit_audit(case, depend):
+    """Reduce the sweep, then check the contingencies screening dropped.
+
+    Chained on `afterany` so it still runs on whatever the last link cached: an audit of
+    a partial sweep is still a proof about the configurations it covers.
+    """
+    depend = sbatch(f"target-{case.name}", "src.sweeps.build_target_cache", case,
+                    "2:00:00", depend=depend, kind="afterany")
+    sbatch(f"audit-{case.name}", "src.sweeps.audit_screening", case, AUDIT_TIME,
+           depend=depend, args=["--top", str(AUDIT_TOP), "--random", str(AUDIT_RANDOM)])
 
 
 def main():
@@ -143,10 +168,12 @@ def main():
         check_inputs(case)
         if TEST:
             print(f"  test job: {TEST_CONFIGS} random configs -> {case.name}_random")
+            submit_sweep(case, prepare(case))
         elif remaining_chunks(case) == 0:
-            print("  nothing left to solve; skipping")
-            continue
-        submit_sweep(case, prepare(case))
+            print("  enumeration complete; submitting the audit only")
+            submit_audit(case, None)
+        else:
+            submit_audit(case, submit_sweep(case, prepare(case)))
 
 
 if __name__ == "__main__":

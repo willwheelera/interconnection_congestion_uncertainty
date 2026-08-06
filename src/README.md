@@ -66,7 +66,7 @@ runs with `-m` from anywhere.
 uv run python -m src.cases.build_ieee_queue   --case case30_queue
 uv run python -m src.cases.calibrate_ratings  --case case30_queue
 
-# 2. screen the N-1 set for fast interactive runs (the ground-truth sweep skips this)
+# 2. screen the N-1 set down to the contingencies that bind, at the case's own recipe
 uv run python -m src.cases.screen_contingencies --case case30_queue
 
 # 3. exhaustive ground truth -> results/<case>/mu_cache/
@@ -76,14 +76,19 @@ uv run python -m src.sweeps.enumerate_configs --case case30_queue --workers 16
 uv run python -m src.sweeps.build_target_cache --case case30_queue
 uv run python -m src.sweeps.build_dual_cache   --case case30_queue
 
-# 5. estimate, describe, draw
+# 5. prove step 2 did not throw away a binder -- read this before trusting step 3
+uv run python -m src.sweeps.audit_screening    --case case30_queue
+
+# 6. estimate, describe, draw
 uv run python -m src.sampling.run_experiments  --case case30_queue
 uv run python -m src.figures.tail.per_line_survivor --case case30_queue
 uv run python -m src.figures.descriptors
 ```
 
 Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
-resumes, and `--shard i/n` splits it across jobs.
+resumes, and `--shard i/n` splits it across jobs.  Step 5 is not optional: a screened set
+that misses a binding contingency produces duals that are wrong, not merely imprecise, and
+nothing earlier in the pipeline detects it.
 
 ## Running a sweep on the cluster
 
@@ -101,7 +106,8 @@ Each case becomes a chain of dependent jobs, and a preparation step is submitted
 its output file is missing:
 
 ```
-select_relief_set  ->  screen_contingencies  ->  sweep (array of SHARDS) x LINKS
+select_relief_set -> screen_contingencies -> sweep (array of SHARDS) x LINKS
+                                                 -> build_target_cache -> audit_screening
 ```
 
 Both preparation steps depend on where the queue sits, so **a new queue gets its own relief
@@ -109,15 +115,31 @@ set and its own screened contingency set** — neither is inherited from another
 one sharing the same network and fleet.  Screening runs at the case's own recipe, which
 includes its relief set, so it waits on relief selection.  The sweep links are chained with
 `--dependency=afterany` so a shard stopped at the walltime is continued by the next; cached
-chunks are skipped, and a case with nothing left is reported and not submitted.
+chunks are skipped, and a case whose enumeration is already complete gets only the last two
+jobs.
 
 The contingency set dominates the cost.  Measured on ACTIVSg2000, one worker per snapshot,
 one Gurobi thread, warm-started re-solves: 403 ms/config over the full 2756-contingency set
 against 12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB resident
-per worker.  Screening is what makes a 2^20 enumeration affordable; `evaluator.audit`, which
-recomputes every dropped contingency's post-outage flows at the solved dispatch, is what
-makes it exact.  That method has no entry point of its own yet — the audit is currently
-reachable only from Python, not from a script.
+per worker.  Screening is what makes a 2^20 enumeration affordable; the audit is what makes
+it exact, which is why the chain ends there rather than at the sweep.
+
+### Reading the audit
+
+`sweeps/audit_screening.py` re-solves a selection of configurations — the largest `max_mu`,
+plus a uniform sample — and recomputes every *dropped* contingency's post-outage flows at
+the solved dispatch.  A configuration with no violation is proved exact: adding constraints
+the solution already satisfies cannot move the optimum, so the screened duals are the full
+problem's duals.  A configuration with a violation is not slightly off; its sweep entry is
+wrong and the case needs re-screening.
+
+This is not hypothetical.  `activsg2000_original_v12` ships a 33-contingency screened set
+whose record carries no recipe, because it was screened before the factor-1.2 recipe existed
+— and the audit fails on it.  On the 2025-02-19 06:00 snapshot, contingency 457 overloads
+branch 449 by 0.36%; putting that one contingency back in the model prices it at the $3500
+cap, moves the objective by 0.11%, and moves that snapshot's `sum_mu` from 25288 to 28770.
+For comparison, `activsg2000_2025`, screened by the current recipe-aware screener, keeps 104
+contingencies where v12 keeps 33.
 
 ## The data contract between stages
 
@@ -216,17 +238,34 @@ this is a property of the solver — dual simplex, primal simplex, and barrier w
 give identical duals on a fresh model — nor of tied generator costs, which produce multiple
 optimal *dispatches* rather than multiple prices.
 
-**Worker count is part of this.**  `SnapshotParallel` now runs several replica workers per
-snapshot so a sweep fills its whole allocation, and each replica sees a different subset of
-the configurations, so their resident constraint sets diverge in exactly the way above.
-Measured on `activsg2000_original_v12`, screened set, 1 replica against 3: individual
-constraint duals move by up to ~100 $/MWh, while `max_mu` moves by at most 0.34 $/MWh out
-of ~1500 (2e-4 relative).  Two 1-replica runs of the same configurations agree to 1e-3 on
-any constraint and 1e-9 on `max_mu`, so the divergence is the replicas, not the solver, and
-it does not shrink as workers accumulate history (tested at 5, 21, and 64 configurations
-per worker).  The scalar targets are unaffected at any threshold of interest; per-line work
-off `dual_cache` is the part that would notice.  Set `CPUS` to the snapshot count in
+**Worker count is part of this, and it is the second reason, not the first.**
+`SnapshotParallel` runs several replica workers per snapshot so a sweep fills its whole
+allocation.  Each replica sees a different subset of the configurations, so their resident
+constraint sets diverge — but what that changes is which of several tied optimal dual
+vectors comes back, not the answer.  Two measurements on `activsg2000_original_v12`,
+screened set:
+
+- *One process, two histories.*  Two models solve the same 40 configurations; one has ten
+  extra configurations in front of them.  Relative objective difference: median 1.4e-10,
+  max 4.7e-9, never above 1e-6.  Worst single dual difference 0.17 $/MWh.  One
+  configuration in 40 prices a constraint the other does not.
+- *Real evaluator, 1 replica against 2, 64 configurations.*  958 constraint entries
+  disagree; 946 of them are present in both runs with a different value and only 12 are
+  missing from one.  The worst disagreements come in pairs of equal magnitude on the same
+  contingency (`ctg:768:776` and `ctg:768:777`, 34.6 $/MWh each) — dual mass moving between
+  two tied rows.  It is mass moving rather than appearing: per-constraint differences reach
+  34.6 while `sum_mu` differs by at most 0.043 and `max_mu` by at most 0.037, against a
+  `max_mu` range of 915–2018.
+
+So the dispatch, the cost, and both scalar targets are effectively replica-independent; a
+per-line study off `dual_cache` that cares about a specific constraint on a specific
+contingency is the work that would notice.  Set `CPUS` to the snapshot count in
 `submit_cluster` to get back one worker per snapshot.
+
+Replicas are not free throughput either.  Going 8 → 16 workers measured 29.9 → 22.2
+ms/config, a 1.34x speedup for 2x the workers — but that was on a 10-physical-core laptop,
+where 16 single-threaded solvers are oversubscribed.  Scaling on a 40-core node is
+unmeasured.
 
 Concretely: re-running `case14_queue` twice changes about 8 of 66,000 dual rows; re-running
 against a cache built on a different day changes about 120 rows and roughly 0.2% of
