@@ -27,8 +27,23 @@ Egret/
 
 
 
-# Slurm job logs
-slurm/
+# Slurm job logs. The directory itself is tracked because Slurm opens the --output
+# file before the job script runs, so a fresh clone with no slurm/ fails to start.
+slurm/*
+!slurm/.gitkeep
+
+# Editor swap files
+*.swp
 
 # Fetched ERCOT datasets: re-downloadable via src/ercot/fetch_ercot.py
 data/ercot/
+
+# Bulk downloads: too large to track and re-fetchable from their source.
+# texas_model/ercot_queue is NOT here -- it is the scraped ERCOT interconnection queue
+# that the Texas queue builders read, and it is tracked.
+texas_model/ACTIVSg2000/
+data/Texas_EPIGRIDS/
+data/pglib-uc-master/
+data/*.zip
+data/ercot_mora/
+data/ercot_cdr/

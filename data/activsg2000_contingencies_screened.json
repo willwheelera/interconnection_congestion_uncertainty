@@ -1,0 +1,86 @@
+{
+  "n_total": 2756,
+  "n_kept": 13,
+  "stress_configs": [
+    "all_off",
+    "all_on",
+    "half0",
+    "half1",
+    "half2",
+    "half3",
+    "half4",
+    "half5",
+    "half6",
+    "half7",
+    "half8",
+    "half9",
+    "half10",
+    "half11",
+    "half12",
+    "half13",
+    "half14",
+    "half15",
+    "half16",
+    "half17",
+    "half18",
+    "half19",
+    "half20",
+    "half21",
+    "half22",
+    "half23"
+  ],
+  "contingencies": {
+    "329": {
+      "n_cells_bound": 6,
+      "max_mu": 579.4762970744782
+    },
+    "464": {
+      "n_cells_bound": 17,
+      "max_mu": 281.19033708139455
+    },
+    "68": {
+      "n_cells_bound": 11,
+      "max_mu": 93.02955579022235
+    },
+    "60": {
+      "n_cells_bound": 56,
+      "max_mu": 61.43820288289322
+    },
+    "629": {
+      "n_cells_bound": 70,
+      "max_mu": 41.83262860402146
+    },
+    "148": {
+      "n_cells_bound": 54,
+      "max_mu": 41.01738836056552
+    },
+    "955": {
+      "n_cells_bound": 67,
+      "max_mu": 36.965548799895885
+    },
+    "2451": {
+      "n_cells_bound": 16,
+      "max_mu": 30.22556384744339
+    },
+    "426": {
+      "n_cells_bound": 64,
+      "max_mu": 30.108425965054206
+    },
+    "152": {
+      "n_cells_bound": 74,
+      "max_mu": 26.95131825348348
+    },
+    "2522": {
+      "n_cells_bound": 9,
+      "max_mu": 15.736948435964553
+    },
+    "805": {
+      "n_cells_bound": 73,
+      "max_mu": 10.645562994287534
+    },
+    "2355": {
+      "n_cells_bound": 27,
+      "max_mu": 5.591977557329635
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "n_total": 19,
+  "n_kept": 7,
+  "n_stress": 32,
+  "contingencies": {
+    "20": {
+      "n_cells_bound": 48,
+      "max_mu": 438.94497036729774
+    },
+    "10": {
+      "n_cells_bound": 14,
+      "max_mu": 260.4853413670107
+    },
+    "1": {
+      "n_cells_bound": 47,
+      "max_mu": 139.99999999999983
+    },
+    "18": {
+      "n_cells_bound": 13,
+      "max_mu": 99.84331549733469
+    },
+    "8": {
+      "n_cells_bound": 1,
+      "max_mu": 33.08302367477475
+    },
+    "16": {
+      "n_cells_bound": 1,
+      "max_mu": 20.31779504677728
+    },
+    "7": {
+      "n_cells_bound": 1,
+      "max_mu": 5.7324128582303215
+    }
+  }
+}
