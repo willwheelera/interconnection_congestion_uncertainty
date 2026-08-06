@@ -83,13 +83,30 @@ uv run python -m src.figures.descriptors
 ```
 
 Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
-resumes; `--shard i/n` splits it across cluster jobs (see `scripts/sweep_vacc.slurm`).
+resumes, and `--shard i/n` splits it across jobs.
 
-The contingency set dominates the sweep's cost.  Measured on ACTIVSg2000, one snapshot,
-one Gurobi thread, warm-started re-solves: 403 ms/config over the full 2756-contingency
-set against 12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB of
-resident memory per worker.  A full 2^20 sweep is therefore ~117 h of wall clock, which is
-why the cluster script runs eight shards; `--screened` trades exactness for ~34x.
+## Running a sweep on the cluster
+
+```bash
+uv sync                                                              # login node, once
+uv run python -m src.sweeps.submit_cluster --case <case> --test      # ~5 min, validates
+uv run python -m src.sweeps.submit_cluster --case <case> [<case> ...]
+```
+
+`submit_cluster` checks each case's inputs, reports how much of its enumeration is already
+cached and what the rest will cost, then submits `scripts/sweep_vacc.slurm` as an array of
+shards, chained with `--dependency=afterany` so a shard stopped at the walltime is
+continued by the next link.  `--dry-run` prints the sbatch commands without submitting.
+The batch script itself only solves one shard.
+
+Rerunning after a partial sweep is safe and cheap: cached chunks are skipped, and a case
+with nothing left is reported and not submitted.
+
+The contingency set dominates the cost.  Measured on ACTIVSg2000, one snapshot, one Gurobi
+thread, warm-started re-solves: 403 ms/config over the full 2756-contingency set against
+12 ms over v12's 33-contingency screened set, and 0.89 GB against 0.24 GB resident per
+worker.  A full 2^20 sweep is therefore ~117 h, or ~15 h across eight shards; `--screened`
+trades exactness for ~34x.
 
 ## The data contract between stages
 
