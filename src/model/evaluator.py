@@ -120,18 +120,19 @@ class ConfigParallel(_Pool):
 
 
 class SnapshotParallel(_Pool):
-    """`replicas` workers per load snapshot; each configuration goes to every snapshot.
+    """Each load snapshot gets its own task queue and `workers_per_snapshot` workers on it.
 
     One worker per snapshot uses only as many cores as the case has snapshots, which
-    leaves most of a cluster node idle.  Replicas put several workers on each snapshot's
-    queue so a chunk's configurations are shared between them; every (configuration,
-    snapshot) pair is still produced exactly once, so the aggregation is unchanged.
+    leaves most of a cluster node idle.  Extra workers on a snapshot's queue divide that
+    snapshot's configurations between them -- they are not copies of the work.  Every
+    (configuration, snapshot) pair is still produced exactly once, so aggregation is
+    unchanged.
     """
 
-    def __init__(self, case, screened=True, threads=1, replicas=1):
+    def __init__(self, case, screened=True, threads=1, workers_per_snapshot=1):
         super().__init__(case, screened, threads)
         self.snapshots = case.snapshots()
-        self.replicas = replicas
+        self.workers_per_snapshot = workers_per_snapshot
         self.task_qs = []
 
     def start(self):
@@ -139,7 +140,7 @@ class SnapshotParallel(_Pool):
         for s in self.snapshots:
             tq = self.ctx.Queue()
             self.task_qs.append(tq)
-            for _ in range(self.replicas):
+            for _ in range(self.workers_per_snapshot):
                 self._spawn(s, tq)
 
     def _broadcast(self, kind, configs):
@@ -194,7 +195,7 @@ class SnapshotParallel(_Pool):
 
     def close(self):
         for tq in self.task_qs:
-            for _ in range(self.replicas):
+            for _ in range(self.workers_per_snapshot):
                 tq.put(None)
         for p in self.workers:
             p.join()
@@ -221,8 +222,8 @@ def for_case(case, n_workers=None, screened=True, threads=None):
 
     n_snapshots = len(case.snapshots())
     budget = cores if n_workers is None else n_workers
-    replicas = max(1, budget // n_snapshots)
-    print(f"evaluator: {n_snapshots} snapshots x {replicas} replicas = "
-          f"{n_snapshots * replicas} workers on {cores} cores", flush=True)
+    workers_per_snapshot = max(1, budget // n_snapshots)
+    print(f"evaluator: {n_snapshots} snapshots x {workers_per_snapshot} workers each = "
+          f"{n_snapshots * workers_per_snapshot} workers on {cores} cores", flush=True)
     return SnapshotParallel(case, screened, threads=1 if threads is None else threads,
-                            replicas=replicas)
+                            workers_per_snapshot=workers_per_snapshot)

@@ -239,7 +239,7 @@ give identical duals on a fresh model — nor of tied generator costs, which pro
 optimal *dispatches* rather than multiple prices.
 
 **Worker count is part of this, and it is the second reason, not the first.**
-`SnapshotParallel` runs several replica workers per snapshot so a sweep fills its whole
+`SnapshotParallel` runs several workers per snapshot so a sweep fills its whole
 allocation.  Each replica sees a different subset of the configurations, so their resident
 constraint sets diverge — but what that changes is which of several tied optimal dual
 vectors comes back, not the answer.  Two measurements on `activsg2000_original_v12`,
@@ -249,7 +249,7 @@ screened set:
   extra configurations in front of them.  Relative objective difference: median 1.4e-10,
   max 4.7e-9, never above 1e-6.  Worst single dual difference 0.17 $/MWh.  One
   configuration in 40 prices a constraint the other does not.
-- *Real evaluator, 1 replica against 2, 64 configurations.*  958 constraint entries
+- *Real evaluator, 1 worker per snapshot against 2, 64 configurations.*  958 constraint entries
   disagree; 946 of them are present in both runs with a different value and only 12 are
   missing from one.  The worst disagreements come in pairs of equal magnitude on the same
   contingency (`ctg:768:776` and `ctg:768:777`, 34.6 $/MWh each) — dual mass moving between
@@ -257,12 +257,12 @@ screened set:
   34.6 while `sum_mu` differs by at most 0.043 and `max_mu` by at most 0.037, against a
   `max_mu` range of 915–2018.
 
-So the dispatch, the cost, and both scalar targets are effectively replica-independent; a
+So the dispatch, the cost, and both scalar targets are effectively independent of how many workers share a snapshot; a
 per-line study off `dual_cache` that cares about a specific constraint on a specific
 contingency is the work that would notice.  Set `CPUS` to the snapshot count in
 `submit_cluster` to get back one worker per snapshot.
 
-Replicas are not free throughput either.  Going 8 → 16 workers measured 29.9 → 22.2
+Extra workers per snapshot are not free throughput either.  Going 8 → 16 workers measured 29.9 → 22.2
 ms/config, a 1.34x speedup for 2x the workers — but that was on a 10-physical-core laptop,
 where 16 single-threaded solvers are oversubscribed.  Scaling on a 40-core node is
 unmeasured.

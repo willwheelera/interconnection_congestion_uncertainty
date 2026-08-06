@@ -38,10 +38,10 @@ from src.sweeps.enumerate_configs import CHUNK
 CASES = ["activsg2000_v12_lev0"]   # registered names; see src/cases/registry.py
 
 PARTITION = "general"
-# Cores per task.  The evaluator fills them with single-threaded workers: CPUS // 8
-# replicas of the 8 snapshots.  More than one replica costs a little dual accuracy on
-# non-peak constraints -- see the reproducibility note in src/README.md -- so set this
-# to 8 if a run needs one worker per snapshot exactly.
+# Cores per task.  The evaluator fills them with single-threaded workers: CPUS // 8 on
+# each of the 8 snapshot queues, dividing that snapshot's configurations between them.
+# More than one worker per snapshot costs a little dual accuracy on non-peak constraints
+# -- see the reproducibility note in src/README.md -- so set this to 8 to avoid it.
 CPUS = 40
 SHARDS = 8                # array tasks in the sweep, splitting the enumeration
 LINKS = 2                 # chained sweep jobs per case, each continuing the last
@@ -95,10 +95,10 @@ def remaining_chunks(case):
     """Chunks of the enumeration not yet cached, printed with a cost estimate."""
     total = math.ceil((1 << case.ngen) / CHUNK)
     done = len(list(case.mu_cache.glob("part_*.parquet"))) if case.mu_cache.exists() else 0
-    replicas = max(1, CPUS // len(case.snapshots()))
-    hours = (total - done) * CHUNK * MS_PER_CONFIG / 1000 / 3600 / SHARDS / replicas
+    workers_per_snapshot = max(1, CPUS // len(case.snapshots()))
+    hours = (total - done) * CHUNK * MS_PER_CONFIG / 1000 / 3600 / SHARDS / workers_per_snapshot
     print(f"  {done}/{total} chunks cached, {total - done} left across {SHARDS} shards "
-          f"x {replicas} replicas -> ~{hours:.1f} h per shard")
+          f"x {workers_per_snapshot} workers per snapshot -> ~{hours:.1f} h per shard")
     return total - done
 
 
