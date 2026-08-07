@@ -111,7 +111,9 @@ class PersistentModel:
         An empty result proves the screened solution is also the full problem's solution:
         adding already-satisfied constraints cannot change the optimum.  Each entry is
         (contingency, worst branch, |post-outage flow| pu, emergency limit pu).  The check
-        is built on first use, which is when the dropped set is known.
+        is built on first use, which is when the dropped set is known.  A model built
+        before its case has been screened carries every contingency and so drops none,
+        which is empty for the same reason.
         """
         if self._check is None:
             ptdf = build_audit_ptdf(self.md, full_case)

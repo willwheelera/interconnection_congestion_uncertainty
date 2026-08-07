@@ -55,6 +55,10 @@ class DroppedFlowCheck:
     names the ones to check, normally those the screened model does not carry.  Holds
     8 bytes per (dropped contingency, branch) -- 71 MB on ACTIVSg2000 -- for the life of
     the model it checks.
+
+    `dropped` is empty whenever the model already carries every contingency: a case that
+    has not been screened yet, or one whose screen kept everything.  The check is then
+    trivially satisfied rather than inapplicable, so it builds and reports no violations.
     """
 
     def __init__(self, ptdf, dropped):
@@ -62,6 +66,8 @@ class DroppedFlowCheck:
         self.names = [cn for cn in ptdf.contingencies if cn in dropped]
         self.limits = ptdf.contingency_limits_array
         self.branches = ptdf.branches_keys
+        if not self.names:
+            return
         comps = [ptdf.contingency_compensators[cn] for cn in self.names]
         assert all(c.M.shape[1] == 1 and c.VA_compensator is None for c in comps), \
             "only single-branch outages without phase shifters are handled"
@@ -89,6 +95,8 @@ class DroppedFlowCheck:
         An empty result proves the model's solution also solves the problem carrying every
         dropped contingency: constraints satisfied at an optimum cannot move it.
         """
+        if not self.names:
+            return []
         PFV, _, VA = self.ptdf.calculate_PFV(m)
         beta = np.asarray(self.M.T @ -VA[self.ptdf.ref_bus_mask]).ravel()
         found = []

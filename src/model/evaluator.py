@@ -20,7 +20,9 @@ given, so a sweep or a sampler is written once.
 import logging
 import multiprocessing as mp
 import os
+import traceback
 from collections import defaultdict
+from multiprocessing.connection import wait
 from typing import NamedTuple
 
 from src.model.scdcopf import build_persistent, scalar_target  # noqa: F401
@@ -39,6 +41,13 @@ class SnapshotResult(NamedTuple):
     relief_buses: set
 
 
+class WorkerError(NamedTuple):
+    """A worker's exception, sent back over the result queue for the parent to raise."""
+
+    config: int | None
+    traceback: str
+
+
 def _worker(case, snapshot, screened, threads, relief_buses, task_q, result_q):
     """Build this worker's model once, then serve configurations until told to stop.
 
@@ -46,16 +55,23 @@ def _worker(case, snapshot, screened, threads, relief_buses, task_q, result_q):
     had to buy, the buses whose relief generator was active, and the names of any
     screened-out contingencies the dispatch violates.  A screened solve always carries
     that last check, so no result leaves a worker without the evidence that it is exact.
+
+    A raise here would otherwise be visible only as a traceback in the job's stderr, so
+    it is returned as a `WorkerError` instead; `config` is None if the model never built.
     """
     logging.getLogger("egret").setLevel(logging.WARNING)
-    pm = build_persistent(case, snapshot, screened=screened, threads=threads,
-                          relief_buses=relief_buses)
-    sid = (snapshot or {}).get("timestamp")
-    for cid, config in iter(task_q.get, None):
-        mus = pm.solve(config)
-        dropped = [v[0] for v in pm.audit_dropped(case.case_file)] if screened else []
-        result_q.put((cid, sid, mus, thermal_violations(pm.m, pm.base_mva),
-                      pm.load_shed(), pm.active_relief(), dropped))
+    cid = None
+    try:
+        pm = build_persistent(case, snapshot, screened=screened, threads=threads,
+                              relief_buses=relief_buses)
+        sid = (snapshot or {}).get("timestamp")
+        for cid, config in iter(task_q.get, None):
+            mus = pm.solve(config)
+            dropped = [v[0] for v in pm.audit_dropped(case.case_file)] if screened else []
+            result_q.put((cid, sid, mus, thermal_violations(pm.m, pm.base_mva),
+                          pm.load_shed(), pm.active_relief(), dropped))
+    except Exception:
+        result_q.put(WorkerError(cid, traceback.format_exc()))
 
 
 class _Pool:
@@ -81,6 +97,25 @@ class _Pool:
         p.start()
         self.workers.append(p)
 
+    def _next_result(self):
+        """One result, raising if a worker died rather than waiting on one that never comes.
+
+        Blocks on the result queue and on every worker's exit at once, so a worker that
+        raises (it sends a `WorkerError` first) and one killed outright (out of memory)
+        both surface here instead of leaving the drain short by one and the job hung
+        until its walltime.  Results already queued behind a failure are taken first.
+        """
+        ready = wait([self.result_q._reader] + [p.sentinel for p in self.workers])
+        if self.result_q._reader in ready:
+            result = self.result_q.get()
+            if isinstance(result, WorkerError):
+                raise RuntimeError(f"worker failed on config {result.config}:\n"
+                                   f"{result.traceback}")
+            return result
+        exits = [p.exitcode for p in self.workers if p.exitcode is not None]
+        raise RuntimeError(f"{len(exits)} of {len(self.workers)} workers exited with "
+                           f"nothing left to send; exit codes {exits}")
+
     def restart(self):
         """Rebuild every worker, picking up whatever the case's screened file now holds.
 
@@ -95,8 +130,19 @@ class _Pool:
         self.start()
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, exc_type, *exc):
+        """Close the pool, or kill it outright when unwinding from a failure.
+
+        `close` is polite: it queues a stop behind every configuration still waiting, so
+        the surviving workers would finish the whole batch before joining.  There is
+        nothing to collect once a result is missing, so don't wait for it.
+        """
+        if exc_type is None:
+            self.close()
+            return
+        for p in self.workers:
+            p.terminate()
+            p.join()
 
 
 class ConfigParallel(_Pool):
@@ -118,7 +164,7 @@ class ConfigParallel(_Pool):
             self.task_q.put((cid, list(cfg)))
         out = [None] * len(configs)
         for _ in range(len(configs)):
-            cid, _sid, mus, overload, shed, relief, dropped = self.result_q.get()
+            cid, _sid, mus, overload, shed, relief, dropped = self._next_result()
             out[cid] = (mus, overload, shed, relief)
             self.discovered.update(dropped)
         return out
@@ -177,7 +223,7 @@ class SnapshotParallel(_Pool):
         totals = defaultdict(lambda: defaultdict(float))
         snap = defaultdict(list)
         for _ in range(len(configs) * n):
-            cid, sid, mus, overload, shed, relief, dropped = self.result_q.get()
+            cid, sid, mus, overload, shed, relief, dropped = self._next_result()
             self.discovered.update(dropped)
             for k, v in mus.items():
                 totals[cid][k] += v
