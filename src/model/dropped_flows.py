@@ -21,8 +21,12 @@ Two details carry the speed.  The columns are stored one contingency per row, so
 per-contingency maximum runs along contiguous memory; and they are consumed in blocks of
 `BLOCK` rows through one preallocated buffer, so the arithmetic stays in cache instead of
 streaming a 71 MB temporary three times.  Measured on activsg2000_original_v12, snapshot
-2025-02-19 06:00, 2723 dropped contingencies, against a 26.4 ms solve: 345 ms/config
-through EGRET, 66 with the columns stored but read flat, 11.8 as written here.
+2025-02-19 06:00, 2723 dropped contingencies, against a 26-28 ms solve: 345 ms/config
+through EGRET, 66 with the columns stored but read flat, 12-15 as written here.
+
+What is left is per configuration and does not batch: the limit pass touches 8.7 M
+(contingency, branch) pairs, each configuration brings its own flows, and checking a whole
+chunk at once measures the same (35.9 ms/config against 35.3 interleaved).
 
 Verified against `calculate_PFV_delta` on three snapshots: identical violations, and
 flows agreeing to 7e-16 pu over all 8.7 M (branch, contingency) pairs.
