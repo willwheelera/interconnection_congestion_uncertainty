@@ -21,45 +21,27 @@ Usage:
 
 import argparse
 import json
-from collections import defaultdict
 
 import numpy as np
-import pyomo.environ as pyo
 
 from src.cases import registry
-from src.model.scdcopf import build_persistent
-from src.model.soft_limits import thermal_violations
+from src.model import evaluator
 
-SHED_TOL_MW = 0.05      # a relief generator counts as active above this shed
 DS_TOL = 1.0            # $/MWh; |S_full - S_slim| below this is numerical noise
 
 
-def snapshot_pass(case, snapshot, relief_buses, bits):
-    """Warm-solve each config on one snapshot; yield (mus, active_buses, overload_mw, shed_mw)."""
-    pm = build_persistent(case, snapshot, relief_buses=relief_buses)
-    gens = pm.md.data["elements"]["generator"]
-    for cfg in bits:
-        mus = pm.solve(cfg)
-        active = {gens[nm]["bus"] for nm, v in pm.m.pg.items()
-                  if nm.startswith("lostload_") and (v.value or 0.0) * pm.base_mva > SHED_TOL_MW}
-        ov = max(thermal_violations(pm.m, pm.base_mva).values(), default=0.0)
-        yield mus, active, ov, pm.load_shed()
+def config_targets(case, relief_buses, bits, workers=None):
+    """Per config over all snapshots: (S, active_buses, max_overload_mw, max_shed_mw).
 
-
-def config_targets(case, relief_buses, bits):
-    """Per config over all snapshots: (S, active_buses, max_overload_mw, max_shed_mw)."""
-    snapshots = case.snapshots()
-    n = len(snapshots)
-    totals = [defaultdict(float) for _ in bits]
-    active = [set() for _ in bits]
-    maxov = np.zeros(len(bits)); maxshed = np.zeros(len(bits))
-    for snap in snapshots:
-        for i, (mus, a, ov, shed) in enumerate(snapshot_pass(case, snap, relief_buses, bits)):
-            for k, v in mus.items():
-                totals[i][k] += v
-            active[i] |= a
-            maxov[i] = max(maxov[i], ov); maxshed[i] = max(maxshed[i], shed)
-    S = np.array([max((v / n for v in t.values()), default=0.0) for t in totals])
+    Every (config, snapshot) solve is independent, so this runs on the same worker pool
+    the sweep uses -- `relief_buses=None` puts a relief generator at every load bus.
+    """
+    with evaluator.for_case(case, n_workers=workers, relief_buses=relief_buses) as ev:
+        averages, per_snapshot = ev.evaluate_detailed(bits)
+    S = np.array([evaluator.scalar_target(a) for a in averages])
+    active = [set().union(*(r.relief_buses for r in snaps)) for snaps in per_snapshot]
+    maxov = np.array([max(r.max_overload_mw for r in snaps) for snaps in per_snapshot])
+    maxshed = np.array([max(r.load_shed_mw for r in snaps) for snaps in per_snapshot])
     return S, active, maxov, maxshed
 
 
@@ -72,28 +54,21 @@ def sample_configs(ng, n, rng):
     return rows
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    registry.add_case_arg(ap)
-    ap.add_argument("--collect", type=int, default=400)
-    ap.add_argument("--validate", type=int, default=200)
-    ap.add_argument("--seed", type=int, default=7)
-    args = ap.parse_args()
-
-    case = registry.get(args.case)
+def select(case, collect=400, validate=200, seed=7, workers=None):
+    """Collect the buses that ever shed, validate the set, and write it to data/."""
     ng, snapshots = case.ngen, case.snapshots()
 
-    collect_bits = sample_configs(ng, args.collect, np.random.default_rng(args.seed))
+    collect_bits = sample_configs(ng, collect, np.random.default_rng(seed))
     print(f"collecting active relief buses: {len(collect_bits)} configs x {len(snapshots)} snapshots")
-    _, active_collect, _, shed_collect = config_targets(case, None, collect_bits)
+    _, active_collect, _, shed_collect = config_targets(case, None, collect_bits, workers)
     relief_set = set().union(*active_collect)
     print(f"active relief buses in collection sample: {len(relief_set)}   "
           f"(full-relief system shed max {shed_collect.max():.2f} MW, should be ~0)")
 
-    val_bits = sample_configs(ng, args.validate, np.random.default_rng(args.seed + 1))
+    val_bits = sample_configs(ng, validate, np.random.default_rng(seed + 1))
     print(f"validating on {len(val_bits)} held-out configs (set frozen before their actives)")
-    S_full, active_val, ov_full, _ = config_targets(case, None, val_bits)
-    S_slim, _, ov_slim, shed_slim = config_targets(case, relief_set, val_bits)
+    S_full, active_val, ov_full, _ = config_targets(case, None, val_bits, workers)
+    S_slim, _, ov_slim, shed_slim = config_targets(case, relief_set, val_bits, workers)
 
     dS = np.abs(S_full - S_slim)
     miss = [i for i, a in enumerate(active_val) if not a <= relief_set]
@@ -111,6 +86,17 @@ def main():
     dest.write_text(json.dumps(final))
     verdict = "PASS" if dS.max() <= DS_TOL else "REVIEW (S mismatch on held-out)"
     print(f"\n{verdict}: wrote {len(final)} relief buses -> {dest}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    registry.add_case_arg(ap)
+    ap.add_argument("--collect", type=int, default=400)
+    ap.add_argument("--validate", type=int, default=200)
+    ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=7)
+    args = ap.parse_args()
+    select(registry.get(args.case), args.collect, args.validate, args.seed, args.workers)
 
 
 if __name__ == "__main__":

@@ -4,27 +4,23 @@ Edit the settings below, then run it:
 
     uv run python -m src.sweeps.submit_cluster
 
-Each case becomes a chain of Slurm jobs:
+Each case becomes a short chain of Slurm jobs:
 
-    select_relief_set -> screen_contingencies -> sweep x LINKS
-                                                     -> build_target_cache -> audit_screening
+    prepare_case -> sweep x LINKS -> build_target_cache
 
-A preparation step is submitted only when its output file is missing, and the sweep
-waits on whichever steps were needed.  Both preparation steps depend on the queue, so a
-new queue gets its own relief set and its own screened contingency set rather than
-inheriting another case's.
+`prepare_case` selects the relief bus set and then screens the contingencies, skipping
+whichever already exists; it is one job because neither step is long.  Both depend on the
+queue, so a new queue gets its own pair rather than inheriting another case's.
 
 The sweep skips chunks that are already cached, so a job stopped at the walltime is
-continued by the next link, and a case whose enumeration is already complete gets only
-the reduction and the audit.  The links are chained rather than run side by side: a
-screened sweep rewrites its own contingency set as it discovers binders, and two jobs on
-one case would race for that file.  Cores are filled by the worker pool within a job.
+continued by the next link, and a case whose enumeration is already complete gets only the
+reduction.  The links are chained rather than run side by side: a screened sweep rewrites
+its own contingency set as it discovers binders, and two jobs on one case would race for
+that file.  Cores are filled by the worker pool within a job.
 
-The chain still ends with the audit, but it no longer carries the exactness argument: the
-sweep checks every solve against the dropped contingencies and grows its set when one is
-violated, so re-solving 500 of the swept configurations runs that same check a second time
-and must come back empty.  It is kept because it costs about a minute and it is the only
-thing that would notice the growth loop silently not running.
+There is no audit job.  The sweep checks every solve against the contingencies screening
+dropped and grows its set whenever one is violated, so the cache is exact when it is
+written rather than after something confirms it.
 """
 
 import math
@@ -47,25 +43,14 @@ PARTITION = "general"
 CPUS = 40
 LINKS = 2                 # chained sweep jobs per case, each continuing the last
 
-# Walltimes.  Only the sweep is long; the preparation steps are minutes to a couple of
-# hours, and an inflated request costs queue priority for nothing.  Counts below are the
-# defaults of each module; per-solve costs were measured on the development machine with
-# one Gurobi thread and the cluster ran faster, so these carry real margin.
+# Walltimes.  Only the sweep is long, and an inflated request costs queue priority for
+# nothing.  Preparation is 840 configurations x the case's snapshots against the full N-1
+# set at ~1 s a solve, spread over the node: minutes at 40 cores, and the hour is margin
+# for a smaller allocation.
 SWEEP_TIME = "30:00:00"   # per link; must be under the partition's cap
-# 806 configs x 8 snapshots = 6448 solves, serial in one process, against the full N-1 set
-# (screening has not run yet) and mostly at full relief -- ~1.0 s each, so ~2 h.
-RELIEF_TIME = "4:00:00"
-# 34 stress configs x 8 snapshots = 272 solves against the full N-1 set, but spread over
-# the whole node: ~7 solves per worker at ~0.8 s, plus a ~2 s model build.
-SCREEN_TIME = "0:30:00"
-# 500 configs x 8 snapshots = 4000 screened solves at ~80 ms including the check, spread
-# over the node, plus ~4 s per worker to build the full-contingency PTDF and its columns.
-AUDIT_TIME = "0:30:00"
+PREP_TIME = "1:00:00"     # relief selection and screening together
 
-AUDIT_TOP = 100           # audit the configurations of largest max_mu ...
-AUDIT_RANDOM = 400        # ... and this many uniform draws standing for the rest
-
-SCREENED = True           # solve the screened N-1 set, then audit it after the sweep
+SCREENED = True           # solve the screened N-1 set, growing it as the sweep runs
 DRY_RUN = False           # True prints the sbatch commands instead of submitting
 
 # TEST replaces the enumeration with one short job over a few hundred random
@@ -134,19 +119,14 @@ def sbatch(name, module, case, walltime, depend=None, kind="afterok", args=()):
 
 
 def prepare(case):
-    """Submit the missing preparation steps; return the job the sweep must wait on.
+    """Submit the preparation job when the case is missing either input, else None.
 
-    Screening runs at the case's own recipe, which includes its relief set, so it waits
-    on relief selection whenever that is also being built.
+    `prepare_case` decides for itself which of the two steps to run, so this only has to
+    decide whether the job is needed at all.
     """
-    depend = None
-    if case.relief_file is None:
-        depend = sbatch(f"relief-{case.name}", "src.cases.texas.select_relief_set",
-                        case, RELIEF_TIME)
-    if SCREENED and not case.screened_file.exists():
-        depend = sbatch(f"screen-{case.name}", "src.cases.screen_contingencies",
-                        case, SCREEN_TIME, depend=depend)
-    return depend
+    if case.relief_file is not None and (case.screened_file.exists() or not SCREENED):
+        return None
+    return sbatch(f"prep-{case.name}", "src.cases.prepare_case", case, PREP_TIME)
 
 
 def submit_sweep(case, depend):
@@ -163,16 +143,14 @@ def submit_sweep(case, depend):
     return depend
 
 
-def submit_audit(case, depend):
-    """Reduce the sweep, then re-check the contingencies screening dropped.
+def submit_target(case, depend):
+    """Reduce the sweep's per-dual cache to the scalar target every sampler reads.
 
-    Chained on `afterany` so it still runs on whatever the last link cached: an audit of
-    a partial sweep is still a statement about the configurations it covers.
+    Chained on `afterany` so it still runs on whatever the last link cached: the
+    reduction of a partial sweep still describes the configurations it covers.
     """
-    depend = sbatch(f"target-{case.name}", "src.sweeps.build_target_cache", case,
-                    "2:00:00", depend=depend, kind="afterany")
-    sbatch(f"audit-{case.name}", "src.sweeps.audit_screening", case, AUDIT_TIME,
-           depend=depend, args=["--top", str(AUDIT_TOP), "--random", str(AUDIT_RANDOM)])
+    sbatch(f"target-{case.name}", "src.sweeps.build_target_cache", case,
+           "2:00:00", depend=depend, kind="afterany")
 
 
 def main():
@@ -184,10 +162,10 @@ def main():
             print(f"  test job: {TEST_CONFIGS} random configs -> {case.name}_random")
             submit_sweep(case, prepare(case))
         elif remaining_chunks(case) == 0:
-            print("  enumeration complete; submitting the audit only")
-            submit_audit(case, None)
+            print("  enumeration complete; submitting the reduction only")
+            submit_target(case, None)
         else:
-            submit_audit(case, submit_sweep(case, prepare(case)))
+            submit_target(case, submit_sweep(case, prepare(case)))
 
 
 if __name__ == "__main__":

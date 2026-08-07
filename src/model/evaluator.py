@@ -21,40 +21,56 @@ import logging
 import multiprocessing as mp
 import os
 from collections import defaultdict
+from typing import NamedTuple
 
-from src.model.scdcopf import build_persistent, scalar_target  # noqa: F401  (re-exported)
+from src.model.scdcopf import (USE_CASE_RELIEF, build_persistent,  # noqa: F401
+                               scalar_target)
 from src.model.soft_limits import thermal_violations
 
 
-def _worker(case, snapshot, screened, threads, task_q, result_q):
-    """Build this worker's model once, then serve tasks until told to stop.
+class SnapshotResult(NamedTuple):
+    """One (configuration, snapshot) solve, before averaging over snapshots."""
 
-    A task is (kind, config id, config).  "solve" returns the duals, the overload and
-    shed the recipe's relief mechanisms had to buy, and the names of any screened-out
-    contingencies the dispatch violates; "audit" reports those violations in full detail
-    and nothing else.  A screened solve always carries its own check, so no result
-    leaves a worker without the evidence that it is exact.
+    snapshot: str
+    max_mu: float
+    max_line: str
+    max_overload_mw: float
+    overload_line: str
+    load_shed_mw: float
+    relief_buses: set
+
+
+def _worker(case, snapshot, screened, threads, relief_buses, task_q, result_q):
+    """Build this worker's model once, then serve configurations until told to stop.
+
+    Each result carries the duals, the overload and shed the recipe's relief mechanisms
+    had to buy, the buses whose relief generator was active, and the names of any
+    screened-out contingencies the dispatch violates.  A screened solve always carries
+    that last check, so no result leaves a worker without the evidence that it is exact.
     """
     logging.getLogger("egret").setLevel(logging.WARNING)
-    pm = build_persistent(case, snapshot, screened=screened, threads=threads)
+    pm = build_persistent(case, snapshot, screened=screened, threads=threads,
+                          relief_buses=relief_buses)
     sid = (snapshot or {}).get("timestamp")
-    for kind, cid, config in iter(task_q.get, None):
+    for cid, config in iter(task_q.get, None):
         mus = pm.solve(config)
-        if kind == "audit":
-            result_q.put((cid, sid, pm.audit_dropped(case.case_file)))
-        else:
-            dropped = [v[0] for v in pm.audit_dropped(case.case_file)] if screened else []
-            result_q.put((cid, sid, mus, thermal_violations(pm.m, pm.base_mva),
-                          pm.load_shed(), dropped))
+        dropped = [v[0] for v in pm.audit_dropped(case.case_file)] if screened else []
+        result_q.put((cid, sid, mus, thermal_violations(pm.m, pm.base_mva),
+                      pm.load_shed(), pm.active_relief(), dropped))
 
 
 class _Pool:
     """Shared process management for the two evaluators."""
 
-    def __init__(self, case, screened=True, threads=0):
+    def __init__(self, case, screened=True, threads=0, relief_buses=USE_CASE_RELIEF):
         self.case = case
         self.screened = screened
         self.threads = threads
+        # Resolved here rather than in the worker: `spawn` pickles the sentinel into a
+        # different object, so only a concrete bus set (or None for every load bus) can
+        # cross the process boundary.
+        self.relief_buses = (case.relief_buses() if relief_buses is USE_CASE_RELIEF
+                             else relief_buses)
         self.candidates = case.candidates()
         self.ctx = mp.get_context("spawn")
         self.workers, self.result_q = [], None
@@ -66,7 +82,7 @@ class _Pool:
     def _spawn(self, snapshot, task_q):
         p = self.ctx.Process(target=_worker,
                              args=(self.case, snapshot, self.screened, self.threads,
-                                   task_q, self.result_q))
+                                   self.relief_buses, task_q, self.result_q))
         p.start()
         self.workers.append(p)
 
@@ -91,8 +107,9 @@ class _Pool:
 class ConfigParallel(_Pool):
     """`n_workers` identical models pulling whole configurations off one shared queue."""
 
-    def __init__(self, case, n_workers=8, screened=True, threads=1):
-        super().__init__(case, screened, threads)
+    def __init__(self, case, n_workers=8, screened=True, threads=1,
+                 relief_buses=USE_CASE_RELIEF):
+        super().__init__(case, screened, threads, relief_buses)
         self.n_workers = n_workers
         self.task_q = None
 
@@ -102,33 +119,19 @@ class ConfigParallel(_Pool):
             self._spawn(None, self.task_q)
 
     def evaluate_detailed(self, configs):
-        """Per config: ({constraint: mu}, {constraint: overload MW}, shed MW), in order."""
+        """Per config: ({constraint: mu}, {constraint: overload MW}, shed MW, relief buses)."""
         for cid, cfg in enumerate(configs):
-            self.task_q.put(("solve", cid, list(cfg)))
+            self.task_q.put((cid, list(cfg)))
         out = [None] * len(configs)
         for _ in range(len(configs)):
-            cid, _sid, mus, overload, shed, dropped = self.result_q.get()
-            out[cid] = (mus, overload, shed)
+            cid, _sid, mus, overload, shed, relief, dropped = self.result_q.get()
+            out[cid] = (mus, overload, shed, relief)
             self.discovered.update(dropped)
         return out
 
     def evaluate(self, configs):
         """Per config {constraint: mu}, in the order the configs were given."""
         return [r[0] for r in self.evaluate_detailed(configs)]
-
-    def audit(self, configs):
-        """Screened-out contingencies each config violates at its solved dispatch.
-
-        An empty dict means that config's screened result is provably exact.  Each
-        value is {contingency: (worst branch, |post-outage flow| pu, limit pu)}.
-        """
-        for cid, cfg in enumerate(configs):
-            self.task_q.put(("audit", cid, list(cfg)))
-        out = [None] * len(configs)
-        for _ in range(len(configs)):
-            cid, _sid, violated = self.result_q.get()
-            out[cid] = {cn: (bn, flow, lim) for cn, bn, flow, lim in violated}
-        return out
 
     def close(self):
         for _ in self.workers:
@@ -147,8 +150,9 @@ class SnapshotParallel(_Pool):
     unchanged.
     """
 
-    def __init__(self, case, screened=True, threads=1, workers_per_snapshot=1):
-        super().__init__(case, screened, threads)
+    def __init__(self, case, screened=True, threads=1, workers_per_snapshot=1,
+                 relief_buses=USE_CASE_RELIEF):
+        super().__init__(case, screened, threads, relief_buses)
         self.snapshots = case.snapshots()
         self.workers_per_snapshot = workers_per_snapshot
         self.task_qs = []
@@ -161,56 +165,37 @@ class SnapshotParallel(_Pool):
             for _ in range(self.workers_per_snapshot):
                 self._spawn(s, tq)
 
-    def _broadcast(self, kind, configs):
-        for cid, cfg in enumerate(configs):
-            for tq in self.task_qs:
-                tq.put((kind, cid, list(cfg)))
-
     def evaluate_detailed(self, configs):
         """Load-averaged mu per config, and the per-snapshot detail behind it.
 
         Returns (averages, per_snapshot).  averages[cid] is {constraint: mean mu over
-        snapshots}, the quantity of interest.  per_snapshot[cid] is one
-        (snapshot id, max mu, argmax constraint, max overload MW, overload line, shed MW)
-        tuple per snapshot -- the single-hour peak before averaging, which is what
-        compares to real per-hour shadow prices, plus the overload the shadow-price cap
-        allowed and the system-wide shed.  Together those two expose any configuration
-        the slimmed relief set could not fully serve.
+        snapshots}, the quantity of interest.  per_snapshot[cid] is one `SnapshotResult`
+        per snapshot -- the single-hour peak before averaging, which is what compares to
+        real per-hour shadow prices, plus the overload the shadow-price cap allowed, the
+        system-wide shed, and which relief buses were active.  Together those expose any
+        configuration the slimmed relief set could not fully serve, and they are what
+        `cases.texas.select_relief_set` chooses that set from.
         """
         n = len(self.snapshots)
-        self._broadcast("solve", configs)
+        for cid, cfg in enumerate(configs):
+            for tq in self.task_qs:
+                tq.put((cid, list(cfg)))
         totals = defaultdict(lambda: defaultdict(float))
         snap = defaultdict(list)
         for _ in range(len(configs) * n):
-            cid, sid, mus, overload, shed, dropped = self.result_q.get()
+            cid, sid, mus, overload, shed, relief, dropped = self.result_q.get()
             self.discovered.update(dropped)
             for k, v in mus.items():
                 totals[cid][k] += v
             con, mu = max(mus.items(), key=lambda kv: kv[1], default=("none", 0.0))
             ov_line, ov_mw = max(overload.items(), key=lambda kv: kv[1], default=("none", 0.0))
-            snap[cid].append((sid, mu, con, ov_mw, ov_line, shed))
+            snap[cid].append(SnapshotResult(sid, mu, con, ov_mw, ov_line, shed, relief))
         averages = [{k: v / n for k, v in totals[cid].items()} for cid in range(len(configs))]
         return averages, [snap[cid] for cid in range(len(configs))]
 
     def evaluate(self, configs):
         """Load-averaged mu per config; broadcasts to every snapshot worker."""
         return self.evaluate_detailed(configs)[0]
-
-    def audit(self, configs):
-        """Screened-out contingencies each config violates, unioned over snapshots.
-
-        An empty dict means that config's screened result is provably exact.  Each
-        value is {contingency: (worst branch, |post-outage flow| pu, limit pu)}.
-        """
-        n = len(self.snapshots)
-        self._broadcast("audit", configs)
-        per = defaultdict(dict)
-        for _ in range(len(configs) * n):
-            cid, _sid, violated = self.result_q.get()
-            for cn, bn, flow, lim in violated:
-                if cn not in per[cid] or flow > per[cid][cn][1]:
-                    per[cid][cn] = (bn, flow, lim)
-        return [dict(per[cid]) for cid in range(len(configs))]
 
     def close(self):
         for tq in self.task_qs:
@@ -226,23 +211,25 @@ def available_cores():
     return int(allocated) if allocated else len(os.sched_getaffinity(0))
 
 
-def for_case(case, n_workers=None, screened=True, threads=None):
+def for_case(case, n_workers=None, screened=True, threads=None,
+             relief_buses=USE_CASE_RELIEF):
     """The evaluator the case's parallel axis calls for, sized to the cores available.
 
     Leaving `n_workers` and `threads` unset fills the allocation with single-threaded
     workers, which is what a sweep wants: these LPs parallelize far better over
     configurations than inside one solve.  Both can be set to override that.
+    `relief_buses` overrides the case's relief set, for the step that selects it.
     """
     cores = available_cores()
+    threads = 1 if threads is None else threads
     if case.parallel == "config":
         n = cores if n_workers is None else n_workers
         print(f"evaluator: {n} config-parallel workers on {cores} cores", flush=True)
-        return ConfigParallel(case, n, screened, threads=1 if threads is None else threads)
+        return ConfigParallel(case, n, screened, threads, relief_buses)
 
     n_snapshots = len(case.snapshots())
     budget = cores if n_workers is None else n_workers
     workers_per_snapshot = max(1, budget // n_snapshots)
     print(f"evaluator: {n_snapshots} snapshots x {workers_per_snapshot} workers each = "
           f"{n_snapshots * workers_per_snapshot} workers on {cores} cores", flush=True)
-    return SnapshotParallel(case, screened, threads=1 if threads is None else threads,
-                            workers_per_snapshot=workers_per_snapshot)
+    return SnapshotParallel(case, screened, threads, workers_per_snapshot, relief_buses)

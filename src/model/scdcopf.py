@@ -49,6 +49,10 @@ from src.model.soft_limits import enable_soft_limits
 # to exceed the number of simultaneously soft-violated constraints.
 MAX_VIOLATIONS_PER_ITERATION = 200
 
+# Output above which an ORDC relief generator counts as active, and its bus therefore
+# needs relief.  `cases.texas.select_relief_set` is what this exists for.
+RELIEF_ACTIVE_TOL_MW = 0.05
+
 
 def extract_mu(m, base_mva: float) -> dict[str, float]:
     """{constraint_id: mu} for every binding base and post-contingency thermal limit."""
@@ -76,6 +80,11 @@ class PersistentModel:
         self.base_mva = base_mva
         self.screened = screened             # contingency names actually in the model
         self._check = None                   # DroppedFlowCheck, built on first audit
+        # {relief generator: its bus}, so active_relief scans the relief generators only
+        # and not every generator in the fleet.
+        self.relief_bus = {nm: g["bus"] for nm, g
+                           in md_scaled.data["elements"]["generator"].items()
+                           if nm.startswith("lostload_")}
 
     def solve(self, config) -> dict[str, float]:
         """Apply a configuration via candidate bounds, warm re-solve, return mu."""
@@ -90,6 +99,11 @@ class PersistentModel:
     def load_shed(self) -> float:
         """System-wide fallback shed at the current solution (MW)."""
         return float(pyo.value(self.m.p_load_shed)) * self.base_mva
+
+    def active_relief(self, tol_mw: float = RELIEF_ACTIVE_TOL_MW) -> set:
+        """Buses whose ORDC relief generator is producing at the current solution."""
+        return {bus for nm, bus in self.relief_bus.items()
+                if (self.m.pg[nm].value or 0.0) * self.base_mva > tol_mw}
 
     def audit_dropped(self, full_case) -> list[tuple]:
         """Contingencies dropped by screening that are violated at the current dispatch.

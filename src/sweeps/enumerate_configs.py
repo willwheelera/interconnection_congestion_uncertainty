@@ -95,8 +95,9 @@ def snapshot_rows(chunk, results, pw):
         cid, n_on = int(cfg @ pw), int(cfg.sum())
         for con, mu in (avg or {"none": 0.0}).items():
             rows.append((cid, n_on, con, mu))
-        for sid, max_mu, max_line, ov_mw, ov_line, shed in snaps:
-            aux.append((cid, n_on, sid, max_mu, max_line, ov_mw, ov_line, shed))
+        for r in snaps:
+            aux.append((cid, n_on, r.snapshot, r.max_mu, r.max_line,
+                        r.max_overload_mw, r.overload_line, r.load_shed_mw))
     return rows, aux
 
 
@@ -106,7 +107,7 @@ def config_rows(chunk, results, pw):
     Same snapmax schema as the snapshot-parallel path, with `snapshot` null: a
     single-load-level case has exactly one implicit snapshot."""
     rows, aux = [], []
-    for cfg, (mus, overload, shed) in zip(chunk, results):
+    for cfg, (mus, overload, shed, _relief) in zip(chunk, results):
         cid, n_on = int(cfg @ pw), int(cfg.sum())
         for con, mu in (mus or {"none": 0.0}).items():
             rows.append((cid, n_on, con, mu))

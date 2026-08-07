@@ -66,8 +66,8 @@ runs with `-m` from anywhere.
 uv run python -m src.cases.build_ieee_queue   --case case30_queue
 uv run python -m src.cases.calibrate_ratings  --case case30_queue
 
-# 2. screen the N-1 set down to the contingencies that bind, at the case's own recipe
-uv run python -m src.cases.screen_contingencies --case case30_queue
+# 2. the sweep's two inputs: the relief bus set, then the contingencies that bind
+uv run python -m src.cases.prepare_case       --case case30_queue
 
 # 3. exhaustive ground truth -> results/<case>/mu_cache/
 uv run python -m src.sweeps.enumerate_configs --case case30_queue --workers 16
@@ -76,19 +76,17 @@ uv run python -m src.sweeps.enumerate_configs --case case30_queue --workers 16
 uv run python -m src.sweeps.build_target_cache --case case30_queue
 uv run python -m src.sweeps.build_dual_cache   --case case30_queue
 
-# 5. re-check the finished cache against every dropped contingency
-uv run python -m src.sweeps.audit_screening    --case case30_queue
-
-# 6. estimate, describe, draw
+# 5. estimate, describe, draw
 uv run python -m src.sampling.run_experiments  --case case30_queue
 uv run python -m src.figures.tail.per_line_survivor --case case30_queue
 uv run python -m src.figures.descriptors
 ```
 
-Steps 1–2 are idempotent.  Step 3 skips parts that already exist, so an interrupted sweep
-resumes; run one sweep job per case at a time, because a screened sweep rewrites the
-contingency set of step 2 as it goes.  Step 5 re-checks a finished cache, and on a sweep
-run with `--screened` it should find nothing — the sweep already guarantees that.
+Steps 1–2 are idempotent, and step 2 skips whichever of its two halves already has its
+output file.  Step 3 skips parts that already exist, so an interrupted sweep resumes; run
+one sweep job per case at a time, because a screened sweep rewrites the contingency set of
+step 2 as it goes.  There is no separate audit step: the sweep checks every solve against
+the contingencies screening dropped, so the cache is exact when it is written.
 
 ## Running a sweep on the cluster
 
@@ -102,22 +100,22 @@ uv run python -m src.sweeps.submit_cluster       # with TEST = True first, ~5 mi
 uv run python -m src.sweeps.submit_cluster       # then TEST = False
 ```
 
-Each case becomes a chain of dependent jobs, and a preparation step is submitted only when
-its output file is missing:
+Each case becomes a chain of dependent jobs, and the preparation job is submitted only when
+one of its two outputs is missing:
 
 ```
-select_relief_set -> screen_contingencies -> sweep x LINKS
-                                                 -> build_target_cache -> audit_screening
+prepare_case -> sweep x LINKS -> build_target_cache
 ```
 
 Both preparation steps depend on where the queue sits, so **a new queue gets its own relief
 set and its own screened contingency set** — neither is inherited from another case, even
-one sharing the same network and fleet.  Screening runs at the case's own recipe, which
-includes its relief set, so it waits on relief selection.  The sweep links are chained with
-`--dependency=afterany` so a job stopped at the walltime is continued by the next; cached
-chunks are skipped, and a case whose enumeration is already complete gets only the last two
-jobs.  There is one sweep job per case at a time, never an array: a screened sweep rewrites
-`data/<case>_screened.json` as it runs, and concurrent jobs would race for it.  A node is
+one sharing the same network and fleet.  They share a job because neither is long: both run
+on the same worker pool the sweep does, 840 configurations against the full N-1 set at about
+a second a solve, so an hour of walltime is already margin.  The sweep links are chained
+with `--dependency=afterany` so a job stopped at the walltime is continued by the next;
+cached chunks are skipped, and a case whose enumeration is already complete gets only the
+reduction.  There is one sweep job per case at a time, never an array: a screened sweep
+rewrites `data/<case>_screened.json` as it runs, and concurrent jobs would race for it.  A node is
 filled by the evaluator's worker pool instead.
 
 ### How a screened sweep stays exact
@@ -166,19 +164,14 @@ configuration, which is what took it from 345 ms to 12–15.  What remains does 
 each configuration brings its own flows, so checking a whole chunk at once measures the
 same.  Resident memory is 0.24 GB per worker screened against 0.89 GB full.
 
-### Reading the audit
+### Caches that predate the growth loop
 
-`sweeps/audit_screening.py` re-solves a selection of configurations — the largest `max_mu`,
-plus a uniform sample — and recomputes every dropped contingency's post-outage flows at the
-solved dispatch.  It is now a check on a finished cache rather than the thing that makes it
-exact: a sweep run with `--screened` should audit clean, and a violation means the cache was
-written by an older sweep.
-
-That is not hypothetical.  Both Texas caches predate the augmenting loop and fail the audit:
-`activsg2000_original_v12` on 500 of 500 configurations, `activsg2000_2025` on 100 of 100,
-worst overload 112.5% of limit.  The root cause was EGRET's `max_violations_per_iteration`
-(see `model/scdcopf.py`), which made the *screening* solves miss binders; both cases need
-re-screening and re-sweeping.
+Both Texas caches were written before the sweep checked itself, and neither is exact.  An
+audit of `activsg2000_original_v12` found a violated dropped contingency on 500 of 500
+configurations, `activsg2000_2025` on 100 of 100, worst overload 112.5% of limit.  The root
+cause was EGRET's `max_violations_per_iteration` (see `model/scdcopf.py`), which made the
+*screening* solves miss binders.  Both cases need re-screening and re-sweeping, and a
+re-sweep now repairs itself: v12's missing contingencies turn up in the first chunk.
 
 ## The data contract between stages
 
