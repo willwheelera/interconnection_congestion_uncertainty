@@ -63,12 +63,18 @@ TEST_CONFIGS = 200
 
 SCRIPT = REPO_ROOT / "src" / "sweeps" / "vacc.slurm"
 
-# Measured on activsg2000_original_v12, one worker per snapshot, one Gurobi thread, warm
-# re-solves, on the development machine: 38 ms/config for the screened set plus the
-# per-solve check on the contingencies screening dropped (26.4 solve, 11.8 check), 570 for
-# the full 2756-contingency set.  The cluster ran the screened solve about twice as fast,
-# so these overestimate; only used to print an estimate.
-MS_PER_CONFIG = 38.0 if SCREENED else 570.0
+# Wall ms per configuration with the node filled as below, measured on the cluster rather
+# than derived from a single worker: 11 ms for activsg2000_v12_lev0 at 40 cores, screened.
+#
+# It is tied to CPUS and does not divide by the workers, because the two halves of a solve
+# scale differently.  The LP does: more workers, proportionally more configurations.  The
+# check on the contingencies screening dropped does not -- it streams an array far larger
+# than any cache, so workers on one node contend for memory bandwidth and the check runs
+# 2.4x slower at 16 workers than alone (see `model.dropped_flows`).  A node's worth of
+# workers is therefore paced by the check, and a per-worker constant divided by the worker
+# count underestimates the sweep by about the same factor.  Narrowing the check to single
+# precision roughly halved it, so this now overestimates.
+MS_PER_CONFIG = 11.0 if SCREENED else 570.0
 
 SWEEP_ARGS = ["--screened"] if SCREENED else []
 if TEST:
@@ -94,7 +100,7 @@ def remaining_chunks(case):
     total = math.ceil((1 << case.ngen) / CHUNK)
     done = len(list(case.mu_cache.glob("part_*.parquet"))) if case.mu_cache.exists() else 0
     workers_per_snapshot = max(1, CPUS // len(case.snapshots()))
-    hours = (total - done) * CHUNK * MS_PER_CONFIG / 1000 / 3600 / workers_per_snapshot
+    hours = (total - done) * CHUNK * MS_PER_CONFIG / 1000 / 3600
     print(f"  {done}/{total} chunks cached, {total - done} left at "
           f"{workers_per_snapshot} workers per snapshot -> ~{hours:.1f} h "
           f"over {LINKS} links of {SWEEP_TIME}")

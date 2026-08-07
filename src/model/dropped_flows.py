@@ -17,19 +17,28 @@ every hour; `beta_c` is one dot product against the solved voltage angles.  EGRE
 recomputes the columns every time because its virtual PTDF exists to avoid storing them.
 Building them once at startup turns the check into arithmetic over an array.
 
-Two details carry the speed.  The columns are stored one contingency per row, so the
-per-contingency maximum runs along contiguous memory; and they are consumed in blocks of
+Three details carry the speed.  The columns are stored one contingency per row, so the
+per-contingency maximum runs along contiguous memory; they are consumed in blocks of
 `BLOCK` rows through one preallocated buffer, so the arithmetic stays in cache instead of
-streaming a 71 MB temporary three times.  Measured on activsg2000_original_v12, snapshot
-2025-02-19 06:00, 2723 dropped contingencies, against a 26-28 ms solve: 345 ms/config
-through EGRET, 66 with the columns stored but read flat, 12-15 as written here.
+streaming a large temporary three times; and they are stored in `DTYPE` rather than double.
+Measured on activsg2000_original_v12, snapshot 2025-02-19 06:00, 2723 dropped
+contingencies, against a 11-28 ms solve: 345 ms/config through EGRET, 66 with the columns
+stored but read flat, 14.5 blocked in double, 6.1 as written here.
+
+The cost is bandwidth, not arithmetic, which is why the width matters and why this does not
+speed up with cores.  The array is read start to end once per configuration and is far
+larger than any cache, so workers sharing a node contend for memory: the same pass measured
+14.5 ms alone and 34.7 ms with 16 workers running it (10 physical cores), against 6.1 and
+15.7 in single precision.  A sweep filling a node with workers is therefore paced by this
+check rather than by the solve it checks, and halving the width halves that pace.
 
 What is left is per configuration and does not batch: the limit pass touches 8.7 M
 (contingency, branch) pairs, each configuration brings its own flows, and checking a whole
 chunk at once measures the same (35.9 ms/config against 35.3 interleaved).
 
 Verified against `calculate_PFV_delta` on three snapshots: identical violations, and
-flows agreeing to 7e-16 pu over all 8.7 M (branch, contingency) pairs.
+flows agreeing to 7e-16 pu over all 8.7 M (branch, contingency) pairs in double.  Single
+precision moves those flows by at most 2e-6 pu, against a 1e-4 pu violation tolerance.
 """
 
 import numpy as np
@@ -38,6 +47,11 @@ import scipy.sparse as sp
 # Post-contingency overflow (per unit) above which a dropped contingency counts as
 # violated -- about 0.01 MW on a 100 MVA base.
 TOL = 1e-4
+
+# Width the columns are stored and the limit pass is run in.  Flows are per unit and O(1),
+# so single precision resolves them to ~1e-6 pu -- two orders below `TOL` -- and the check
+# is bandwidth-bound, so the narrower type is worth about a factor of two.
+DTYPE = np.float32
 
 # Contingencies whose flows are computed in one pass through the working buffer.  Small
 # enough that a block stays in cache; the cost is flat from here to about 128.
@@ -64,7 +78,7 @@ class DroppedFlowCheck:
     def __init__(self, ptdf, dropped):
         self.ptdf = ptdf
         self.names = [cn for cn in ptdf.contingencies if cn in dropped]
-        self.limits = ptdf.contingency_limits_array
+        self.limits = ptdf.contingency_limits_array.astype(DTYPE)
         self.branches = ptdf.branches_keys
         if not self.names:
             return
@@ -74,15 +88,16 @@ class DroppedFlowCheck:
         self.M = sp.hstack([c.M for c in comps], format="csc")
         self.out_idx = np.array([ptdf._branchname_to_index_map[c.branch_out] for c in comps])
         self.columns = self._build_columns(np.array([float(c.c) for c in comps]))
-        self.buffer = np.empty((BLOCK, len(self.limits)))
+        self.buffer = np.empty((BLOCK, len(self.limits)), dtype=DTYPE)
 
     def _build_columns(self, c_scalars):
         """Per-unit flow shift on every branch, one contingency per row.
 
         The whole startup cost of this module: one sparse solve per block, 0.2 s for
-        ACTIVSg2000's 2723 dropped contingencies, never repeated.
+        ACTIVSg2000's 2723 dropped contingencies, never repeated.  The solve itself runs
+        in double and only the stored result is narrowed.
         """
-        out = np.empty((len(self.names), len(self.branches)))
+        out = np.empty((len(self.names), len(self.branches)), dtype=DTYPE)
         for lo in range(0, self.M.shape[1], BUILD_BLOCK):
             hi = lo + BUILD_BLOCK
             shift = self.ptdf.B_dA @ self.ptdf.MLU.solve(self.M[:, lo:hi].toarray())
@@ -98,7 +113,8 @@ class DroppedFlowCheck:
         if not self.names:
             return []
         PFV, _, VA = self.ptdf.calculate_PFV(m)
-        beta = np.asarray(self.M.T @ -VA[self.ptdf.ref_bus_mask]).ravel()
+        beta = np.asarray(self.M.T @ -VA[self.ptdf.ref_bus_mask]).ravel().astype(DTYPE)
+        PFV = PFV.astype(DTYPE)
         found = []
         for lo in range(0, len(self.names), BLOCK):
             rows = self.columns[lo:lo + BLOCK]
