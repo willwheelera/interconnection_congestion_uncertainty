@@ -25,12 +25,17 @@ Measured on activsg2000_original_v12, snapshot 2025-02-19 06:00, 2723 dropped
 contingencies, against a 11-28 ms solve: 345 ms/config through EGRET, 66 with the columns
 stored but read flat, 14.5 blocked in double, 6.1 as written here.
 
-The cost is bandwidth, not arithmetic, which is why the width matters and why this does not
-speed up with cores.  The array is read start to end once per configuration and is far
-larger than any cache, so workers sharing a node contend for memory: the same pass measured
-14.5 ms alone and 34.7 ms with 16 workers running it (10 physical cores), against 6.1 and
-15.7 in single precision.  A sweep filling a node with workers is therefore paced by this
-check rather than by the solve it checks, and halving the width halves that pace.
+The cost is arithmetic, not memory traffic, so `DTYPE` pays through SIMD width rather than
+through bytes moved.  The array is read start to end once per configuration and is far
+larger than any cache, which invites the opposite conclusion, but the same pass over a
+1 MB array that stays resident degrades identically when workers fill a node: 1.52x at 10
+workers on 10 physical cores against 1.57x for the 35 MB array, doing the same arithmetic.
+What degrades is the all-core clock and the shared execution resources.  Sharing one copy
+of the array between workers, or blocking it so it stays in cache, therefore buys nothing.
+
+What does follow is that a sweep filling a node is paced by this check rather than by the
+solve it checks, because the check is simply more expensive: 8.7 ms against 11 ms for a
+solve, in a step that runs once per solve.
 
 What is left is per configuration and does not batch: the limit pass touches 8.7 M
 (contingency, branch) pairs, each configuration brings its own flows, and checking a whole

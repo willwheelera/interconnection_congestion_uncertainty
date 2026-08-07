@@ -66,14 +66,12 @@ SCRIPT = REPO_ROOT / "src" / "sweeps" / "vacc.slurm"
 # Wall ms per configuration with the node filled as below, measured on the cluster rather
 # than derived from a single worker: 11 ms for activsg2000_v12_lev0 at 40 cores, screened.
 #
-# It is tied to CPUS and does not divide by the workers, because the two halves of a solve
-# scale differently.  The LP does: more workers, proportionally more configurations.  The
-# check on the contingencies screening dropped does not -- it streams an array far larger
-# than any cache, so workers on one node contend for memory bandwidth and the check runs
-# 2.4x slower at 16 workers than alone (see `model.dropped_flows`).  A node's worth of
-# workers is therefore paced by the check, and a per-worker constant divided by the worker
-# count underestimates the sweep by about the same factor.  Narrowing the check to single
-# precision roughly halved it, so this now overestimates.
+# It is tied to CPUS and does not divide by the workers.  A solve is not all LP: the check
+# on the contingencies screening dropped costs more than the LP it checks (8.7 ms against
+# 11), and every part of it slows down as the node fills -- about 1.5x at one worker per
+# physical core, from the all-core clock rather than from memory (see `model.dropped_flows`).
+# A per-worker constant divided by the worker count therefore underestimates the sweep.
+# Narrowing the check to single precision roughly halved it, so this now overestimates.
 MS_PER_CONFIG = 11.0 if SCREENED else 570.0
 
 SWEEP_ARGS = ["--screened"] if SCREENED else []
