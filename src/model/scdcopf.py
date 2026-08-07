@@ -21,6 +21,7 @@ a snapshot record scales loads by weather zone and derates renewables to that ho
 """
 
 import json
+import logging
 from pathlib import Path
 
 import pyomo.environ as pyo
@@ -33,10 +34,17 @@ from egret.models.dcopf import _lazy_ptdf_dcopf_model_solve_loop
 from egret.models.scopf import create_scopf_model
 
 from src.model.dropped_flows import DroppedFlowCheck
+from src.model.enforce_contingencies import ContingencyEnforcer
 from src.model.relief import (add_lostload_generators_ordc, add_queue_generators,
                           scale_loads_by_zone, scale_renewables_by_snapshot,
                           set_emergency_factor)
 from src.model.soft_limits import enable_soft_limits
+
+# EGRET calls `quicksum(..., linear=True)` when it declares a thermal limit, and Pyomo
+# deprecated that argument in 6.6.0 and ignores it -- the expression it builds is
+# unchanged.  Pyomo dedupes by call site, so this is four lines per process, times a
+# node's worth of workers.  Silence that one logger rather than the whole of pyomo.core.
+logging.getLogger("pyomo.core.util").setLevel(logging.ERROR)
 
 # How many violations EGRET's lazy loop may track in one pass.  Its default of 5 is wrong
 # for this recipe.  The soft thermal limits leave several monitored constraints violated at
@@ -80,6 +88,9 @@ class PersistentModel:
         self.base_mva = base_mva
         self.screened = screened             # contingency names actually in the model
         self._check = None                   # DroppedFlowCheck, built on first audit
+        # Every solve ends through this: EGRET's lazy loop can return with contingency
+        # constraints unchecked, and no result leaves here on a dispatch it has not held.
+        self.enforcer = ContingencyEnforcer(m, md_scaled)
         # {relief generator: its bus}, so active_relief scans the relief generators only
         # and not every generator in the fleet.
         self.relief_bus = {nm: g["bus"] for nm, g
@@ -87,13 +98,14 @@ class PersistentModel:
                            if nm.startswith("lostload_")}
 
     def solve(self, config) -> dict[str, float]:
-        """Apply a configuration via candidate bounds, warm re-solve, return mu."""
+        """Apply a configuration via candidate bounds, warm re-solve, enforce, return mu."""
         for on, name in zip(config, self.names):
             self.m.pg[name].setub(self.cap_pu[name] if on else 0.0)
             self.solver.update_var(self.m.pg[name])
         _solve_model(self.m, self.solver, solver_tee=False, return_solver=True,
                      set_instance=False)
         _lazy_ptdf_dcopf_model_solve_loop(self.m, self.md, self.solver, solver_tee=False)
+        self.enforcer.enforce(self.m, self.solver)
         return extract_mu(self.m, self.base_mva)
 
     def load_shed(self) -> float:

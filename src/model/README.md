@@ -10,6 +10,8 @@ EGRET.
 | `relief.py` | The ModelData edits the recipe is made of: emergency ratings, queue generators, ORDC-shaped nodal relief, zone/renewable scaling. |
 | `soft_limits.py` | `enable_soft_limits` — the mu cap via EGRET's lazy violation slacks; `thermal_violations` — the overload it bought, in MW. |
 | `evaluator.py` | `ConfigParallel` / `SnapshotParallel` over one shared worker body; `for_case` picks by the case's parallel axis. |
+| `dropped_flows.py` | `DroppedFlowCheck` — post-outage flows for a set of contingencies, from stored flow-shift columns rather than a network solve each. |
+| `enforce_contingencies.py` | `ContingencyEnforcer` — adds back the contingency limits EGRET's lazy loop skipped, so no dispatch is returned unheld. |
 | `dcopf.py` | Plain DCOPF for the legacy `gen_per_bus` testbeds. |
 
 Constraint ids are `base:{line}` for normal thermal limits and `ctg:{contingency}:{line}`
