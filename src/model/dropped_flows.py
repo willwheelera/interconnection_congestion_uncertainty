@@ -39,9 +39,14 @@ What does follow is that a sweep filling a node is paced by this check rather th
 solve it checks, because the check is simply more expensive: 8.7 ms against 11 ms for a
 solve, in a step that runs once per solve.
 
+On top of that, `_reachable` discards outright the contingencies that provably cannot
+overload anything at the dispatch in hand -- 47-69% of the set, worth a further 1.37x.
+
 What is left is per configuration and does not batch: the limit pass touches 8.7 M
-(contingency, branch) pairs, each configuration brings its own flows, and checking a whole
-chunk at once measures the same (35.9 ms/config against 35.3 interleaved).
+(contingency, branch) pairs, each configuration brings its own flows, and checking several
+configurations against one pass over the columns measures 1.25x at best and reverses beyond
+that (15.0 ms/config at one, 12.0 at two, 11.5 at four, 13.4 at eight), because what is
+shared is one read and what is not is all the arithmetic.
 
 Verified against `calculate_PFV_delta` on three snapshots: identical violations, and
 flows agreeing to 7e-16 pu over all 8.7 M (branch, contingency) pairs in double.  Single
@@ -67,6 +72,11 @@ BLOCK = 32
 # Contingencies whose columns are built in one sparse solve, at startup only.  Larger
 # because it runs once and only bounds the transient dense arrays.
 BUILD_BLOCK = 512
+
+# Relative slack demanded before a contingency is skipped unchecked, so the skip never
+# turns on a rounding difference in `DTYPE`.  The measured margin is ~0.16 in per-unit
+# terms, four orders larger, so this costs nothing.
+SKIP_GUARD = 1e-4
 
 
 class DroppedFlowCheck:
@@ -96,6 +106,8 @@ class DroppedFlowCheck:
         self.out_idx = np.array([ptdf._branchname_to_index_map[c.branch_out] for c in comps])
         self.columns = self._build_columns(np.array([float(c.c) for c in comps]))
         self.buffer = np.empty((BLOCK, len(self.limits)), dtype=DTYPE)
+        assert (self.limits > 0).all(), "the skip bound divides by every branch's limit"
+        self.reach = (np.abs(self.columns) / self.limits[None, :]).max(axis=1)
 
     def _build_columns(self, c_scalars):
         """Per-unit flow shift on every branch, one contingency per row.
@@ -123,17 +135,39 @@ class DroppedFlowCheck:
         beta = np.asarray(self.M.T @ -VA[self.ptdf.ref_bus_mask]).ravel().astype(DTYPE)
         PFV = PFV.astype(DTYPE)
         found = []
-        for lo in range(0, len(self.names), BLOCK):
-            rows = self.columns[lo:lo + BLOCK]
-            over = self.buffer[:len(rows)]
-            np.multiply(rows, beta[lo:lo + len(rows), None], out=over)
+        for idx in self._reachable(PFV, beta):
+            over = self.buffer[:len(idx)]
+            np.take(self.columns, idx, axis=0, out=over)
+            over *= beta[idx, None]
             over += PFV[None, :]
-            over[np.arange(len(rows)), self.out_idx[lo:lo + len(rows)]] = 0.0
+            over[np.arange(len(idx)), self.out_idx[idx]] = 0.0
             np.abs(over, out=over)
             over -= self.limits[None, :]
             worst = over.argmax(axis=1)
-            for j in np.flatnonzero(over[np.arange(len(rows)), worst] > TOL):
+            for j in np.flatnonzero(over[np.arange(len(idx)), worst] > TOL):
                 b = worst[j]
-                found.append((self.names[lo + j], self.branches[b],
+                found.append((self.names[idx[j]], self.branches[b],
                               float(over[j, b] + self.limits[b]), float(self.limits[b])))
         return found
+
+    def _reachable(self, PFV, beta):
+        """Blocks of contingency indices that could violate a limit at this dispatch.
+
+        A contingency shifts branch `j` to `PFV_j + beta_c * col_cj`, so in units of that
+        branch's limit its loading is at most `f + |beta_c| * reach_c`, where `f` is the
+        base case's worst loading and `reach_c` the largest column entry relative to a
+        limit.  When that bound is under one the contingency cannot overload anything and
+        is dropped without arithmetic.  The bound only loosens the true maximum, so this
+        never hides a violation; when a base branch is already over a contingency limit it
+        keeps everything, which is the safe direction.
+
+        Measured on activsg2000_original_v12 it discards 47-69% of the set for a 1.37x, and
+        over six configurations -- all candidates on, all off, and four random -- the
+        violations found were identical to checking everything and no discarded contingency
+        came within 0.157 pu of a limit.  The headroom is structural rather than lucky:
+        base flows are held to the long-term rating and compared here against the emergency
+        one, so `f` sits at 1/`emergency_factor` unless a base limit is soft-violated.
+        """
+        f = float((np.abs(PFV) / self.limits).max())
+        keep = np.flatnonzero(np.abs(beta) * self.reach > 1.0 - f - SKIP_GUARD)
+        return [keep[lo:lo + BLOCK] for lo in range(0, len(keep), BLOCK)]
