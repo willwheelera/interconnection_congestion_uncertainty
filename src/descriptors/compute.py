@@ -133,7 +133,7 @@ def candidate_injections(md, ptdf, cap_pu, names, gamma):
 
 def snapshot_descriptors(case, snapshot, constraints, p, config):
     """Slack, swing sigma (MW), and mu for one snapshot at the base configuration."""
-    pm = build_persistent(case, snapshot)
+    pm = build_persistent(case, snapshot, relief_buses=case.relief_buses())
     mus = pm.solve(config)
     m, md, ptdf = pm.m, pm.md, pm.m._PTDF
     names, cap_pu, base_mva = pm.names, pm.cap_pu, pm.base_mva

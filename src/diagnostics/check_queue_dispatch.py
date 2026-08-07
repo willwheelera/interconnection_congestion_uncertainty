@@ -22,7 +22,7 @@ from src.model.scdcopf import build_persistent
 
 def solve_snapshot(case, snapshot):
     """All-on SCDCOPF for one snapshot; return each candidate's dispatch in MW."""
-    pm = build_persistent(case, snapshot)
+    pm = build_persistent(case, snapshot, relief_buses=case.relief_buses())
     pm.solve([1] * case.ngen)
     return {c["id"]: (pm.m.pg[f"queue_{c['id']}"].value or 0.0) * pm.base_mva
             for c in case.candidates() if f"queue_{c['id']}" in pm.m.pg}

@@ -28,7 +28,9 @@ from pathlib import Path
 
 import numpy as np
 
+from src.model.relief import ALL_LOAD_BUSES
 from src.paths import REPO_ROOT
+
 DATA = REPO_ROOT / "data"
 RESULTS = REPO_ROOT / "results"
 
@@ -236,10 +238,10 @@ class Case:
         """
         return self.build_p() if self.candidates_file else self.p_default
 
-    def relief_buses(self) -> set | None:
-        """The buses that get ORDC relief; None means every load bus."""
+    def relief_buses(self) -> set | str:
+        """The buses that get ORDC relief; ALL_LOAD_BUSES until a set has been selected."""
         if self.relief_file is None:
-            return None
+            return ALL_LOAD_BUSES
         return set(json.loads(self.relief_file.read_text()))
 
     def snapshots(self) -> list[dict]:

@@ -139,11 +139,8 @@ def build_audit_ptdf(md, full_case) -> VirtualPTDFMatrix:
                              contingencies=full)
 
 
-USE_CASE_RELIEF = object()      # sentinel: take the relief bus set off the case record
-
-
 def build_persistent(case, snapshot=None, screened=True, threads=0,
-                     relief_buses=USE_CASE_RELIEF) -> PersistentModel:
+                     *, relief_buses) -> PersistentModel:
     """Build the case's SCDCOPF once with every candidate present, ready for warm re-solves.
 
     `snapshot` is one record from the case's snapshot collection (zone load scales and
@@ -151,14 +148,13 @@ def build_persistent(case, snapshot=None, screened=True, threads=0,
     online bound is its capacity derated by the snapshot's capacity factor for its fuel,
     so solar and wind availability tracks the hour.
 
-    `relief_buses` overrides the case's validated relief set -- None means every load bus.
-    Only `cases.texas.select_relief_set`, which exists to choose that set, should pass it.
+    `relief_buses` has no default: it is `case.relief_buses()` for every caller except
+    `cases.texas.select_relief_set`, which exists to choose that set and so passes the set
+    it is testing (or `relief.ALL_LOAD_BUSES` for the full-relief baseline).
     """
     recipe = case.recipe
     cf = (snapshot or {}).get("renewable_cf") or {}
     candidates = case.candidates()
-    if relief_buses is USE_CASE_RELIEF:
-        relief_buses = case.relief_buses()
 
     md = ModelData.read(str(case.solve_file(screened)))
     set_emergency_factor(md, recipe.emergency_factor)

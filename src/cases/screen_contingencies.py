@@ -41,6 +41,7 @@ import numpy as np
 
 from src.cases import registry
 from src.model import evaluator
+from src.model.relief import ALL_LOAD_BUSES
 
 
 def stress_configs(ngen, n_stress, seed):
@@ -82,7 +83,7 @@ def write_screened(case, kept, found, configs, n_total):
         "case": case.name,
         "emergency_factor": case.recipe.emergency_factor,
         "shadow_price_cap": case.recipe.shadow_price_cap,
-        "relief_buses": sorted(relief) if relief else "all",
+        "relief_buses": ALL_LOAD_BUSES if relief == ALL_LOAD_BUSES else sorted(relief),
         "n_total": n_total, "n_kept": len(kept),
         "stress_configs": configs,
         "contingencies": {c: {"n_configs_bound": found[c][0], "max_mu": found[c][1]}
@@ -144,11 +145,11 @@ def screen(case, n_stress, workers, seed):
     print(f"{case.name}: screening {n_total} contingencies of {case.case_file.name} at "
           f"factor {case.recipe.emergency_factor}, ORDC {case.recipe.ordc_min:g}->"
           f"{case.recipe.ordc_max:g} over {case.recipe.ordc_blocks} blocks on "
-          f"{len(relief) if relief else 'all'} relief buses, cap "
+          f"{ALL_LOAD_BUSES if relief == ALL_LOAD_BUSES else len(relief)} relief buses, cap "
           f"${case.recipe.shadow_price_cap:g}, {len(configs)} stress configs", flush=True)
 
     before = previous_kept(case)
-    with evaluator.for_case(case, n_workers=workers, screened=False) as target:
+    with evaluator.for_case(case, relief, n_workers=workers, screened=False) as target:
         found = binding_contingencies(target.evaluate(configs))
 
     kept = sorted(found, key=lambda c: found[c][1], reverse=True)

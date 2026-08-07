@@ -31,7 +31,7 @@ def active_constraints(case) -> tuple[dict, dict]:
     """
     weight, rows = {}, {}
     for snapshot in case.snapshots():
-        pm = build_persistent(case, snapshot)
+        pm = build_persistent(case, snapshot, relief_buses=case.relief_buses())
         ptdf = build_audit_ptdf(pm.md, case.case_file)
         for config in ([0] * case.ngen, [1] * case.ngen):
             for key, mu in pm.solve(config).items():

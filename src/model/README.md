@@ -58,8 +58,12 @@ still factorized on every warm re-solve.  Only 9 of ACTIVSg2000's 1125 load buse
 so relief is restricted to those.
 
 The set is a sweep **input**, not an output: it lives in `data/<case>_relief_set.json` and is
-loaded by `Case.relief_buses()`.  `cases.texas.select_relief_set` chooses and validates it;
-that script is the one caller allowed to pass `build_persistent(relief_buses=...)` directly.
+loaded by `Case.relief_buses()`, which returns `relief.ALL_LOAD_BUSES` for a case that has no
+set yet.  `relief_buses` is required — no default and no sentinel — at both `build_persistent`
+and `evaluator.for_case`, because it decides which model gets built and every caller already
+has the `Case` in hand.  All of them pass `case.relief_buses()` except
+`cases.texas.select_relief_set`, which exists to choose the set and so passes the one under
+test, or `ALL_LOAD_BUSES` for the full-relief baseline it measures against.
 A sweep additionally records per configuration the worst line overload and the system-wide
 shed (`snapmax_cache` / `stress_cache`), so any configuration needing a bus outside the set
 would show up as a large overload or nonzero shed.  Over the full `2^20` Texas sweep the max

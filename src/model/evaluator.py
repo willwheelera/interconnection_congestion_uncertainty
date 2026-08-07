@@ -23,8 +23,7 @@ import os
 from collections import defaultdict
 from typing import NamedTuple
 
-from src.model.scdcopf import (USE_CASE_RELIEF, build_persistent,  # noqa: F401
-                               scalar_target)
+from src.model.scdcopf import build_persistent, scalar_target  # noqa: F401
 from src.model.soft_limits import thermal_violations
 
 
@@ -62,15 +61,11 @@ def _worker(case, snapshot, screened, threads, relief_buses, task_q, result_q):
 class _Pool:
     """Shared process management for the two evaluators."""
 
-    def __init__(self, case, screened=True, threads=0, relief_buses=USE_CASE_RELIEF):
+    def __init__(self, case, relief_buses, screened=True, threads=0):
         self.case = case
+        self.relief_buses = relief_buses
         self.screened = screened
         self.threads = threads
-        # Resolved here rather than in the worker: `spawn` pickles the sentinel into a
-        # different object, so only a concrete bus set (or None for every load bus) can
-        # cross the process boundary.
-        self.relief_buses = (case.relief_buses() if relief_buses is USE_CASE_RELIEF
-                             else relief_buses)
         self.candidates = case.candidates()
         self.ctx = mp.get_context("spawn")
         self.workers, self.result_q = [], None
@@ -107,9 +102,8 @@ class _Pool:
 class ConfigParallel(_Pool):
     """`n_workers` identical models pulling whole configurations off one shared queue."""
 
-    def __init__(self, case, n_workers=8, screened=True, threads=1,
-                 relief_buses=USE_CASE_RELIEF):
-        super().__init__(case, screened, threads, relief_buses)
+    def __init__(self, case, relief_buses, n_workers=8, screened=True, threads=1):
+        super().__init__(case, relief_buses, screened, threads)
         self.n_workers = n_workers
         self.task_q = None
 
@@ -150,9 +144,9 @@ class SnapshotParallel(_Pool):
     unchanged.
     """
 
-    def __init__(self, case, screened=True, threads=1, workers_per_snapshot=1,
-                 relief_buses=USE_CASE_RELIEF):
-        super().__init__(case, screened, threads, relief_buses)
+    def __init__(self, case, relief_buses, screened=True, threads=1,
+                 workers_per_snapshot=1):
+        super().__init__(case, relief_buses, screened, threads)
         self.snapshots = case.snapshots()
         self.workers_per_snapshot = workers_per_snapshot
         self.task_qs = []
@@ -211,25 +205,27 @@ def available_cores():
     return int(allocated) if allocated else len(os.sched_getaffinity(0))
 
 
-def for_case(case, n_workers=None, screened=True, threads=None,
-             relief_buses=USE_CASE_RELIEF):
+def for_case(case, relief_buses, n_workers=None, screened=True, threads=None):
     """The evaluator the case's parallel axis calls for, sized to the cores available.
+
+    `relief_buses` is `case.relief_buses()` for everything but the step that selects that
+    set; it is spelled out at the call site rather than defaulted because it decides which
+    model gets built, and a worker pool is not the place to be guessing that.
 
     Leaving `n_workers` and `threads` unset fills the allocation with single-threaded
     workers, which is what a sweep wants: these LPs parallelize far better over
     configurations than inside one solve.  Both can be set to override that.
-    `relief_buses` overrides the case's relief set, for the step that selects it.
     """
     cores = available_cores()
     threads = 1 if threads is None else threads
     if case.parallel == "config":
         n = cores if n_workers is None else n_workers
         print(f"evaluator: {n} config-parallel workers on {cores} cores", flush=True)
-        return ConfigParallel(case, n, screened, threads, relief_buses)
+        return ConfigParallel(case, relief_buses, n, screened, threads)
 
     n_snapshots = len(case.snapshots())
     budget = cores if n_workers is None else n_workers
     workers_per_snapshot = max(1, budget // n_snapshots)
     print(f"evaluator: {n_snapshots} snapshots x {workers_per_snapshot} workers each = "
           f"{n_snapshots * workers_per_snapshot} workers on {cores} cores", flush=True)
-    return SnapshotParallel(case, screened, threads, workers_per_snapshot, relief_buses)
+    return SnapshotParallel(case, relief_buses, screened, threads, workers_per_snapshot)

@@ -62,7 +62,8 @@ def secure(case, rounds, workers):
     Each round rebuilds the workers, because the ratings they were built from changed."""
     secure_mu = SECURE_FRAC * case.recipe.shadow_price_cap
     for r in range(rounds):
-        with evaluator.for_case(case, n_workers=workers, screened=False) as target:
+        with evaluator.for_case(case, case.relief_buses(), n_workers=workers,
+                                screened=False) as target:
             mus, overload, shed, _relief = target.evaluate_detailed([[0] * case.ngen])[0]
         peak = scalar_target(mus)
         lines = binding_lines(mus, overload, secure_mu)

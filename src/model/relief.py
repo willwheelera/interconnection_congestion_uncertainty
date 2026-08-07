@@ -21,6 +21,11 @@ level -- see notes/ercot_price_formation.md.
 
 from egret.data.model_data import ModelData
 
+# The relief set's other value: a relief generator at every load bus, rather than at the
+# buses of an explicit set.  A named value and not None, so None stays free to mean
+# "unspecified" wherever a relief set is passed down.
+ALL_LOAD_BUSES = "all"
+
 
 def linear_cost(marginal: float) -> dict:
     """Polynomial cost curve with the given linear ($/MWh) coefficient."""
@@ -92,15 +97,16 @@ def ordc_relief_curve(cap: float, c_min: float, c_max: float, n_blocks: int) -> 
 
 
 def add_lostload_generators_ordc(md: ModelData, c_min: float, c_max: float,
-                                 n_blocks: int, buses=None) -> None:
-    """Relief generator at each load bus (or only `buses`) on an ORDC-shaped curve.
+                                 n_blocks: int, buses) -> None:
+    """Relief generator on an ORDC-shaped curve at each bus in `buses`, or at every load bus.
 
-    Keep c_max below the system slack price so nodal relief still beats EGRET's
-    system-wide slack.  Call after scale_loads_by_zone.
+    `buses` is a set of bus names or `ALL_LOAD_BUSES`.  Keep c_max below the system slack
+    price so nodal relief still beats EGRET's system-wide slack.  Call after
+    scale_loads_by_zone.
     """
     gens = md.data["elements"]["generator"]
     for name, load in md.data["elements"]["load"].items():
-        if buses is not None and load["bus"] not in buses:
+        if buses != ALL_LOAD_BUSES and load["bus"] not in buses:
             continue
         cap = float(load["p_load"])
         if cap <= 0.0:

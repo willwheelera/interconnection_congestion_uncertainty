@@ -26,6 +26,7 @@ import numpy as np
 
 from src.cases import registry
 from src.model import evaluator
+from src.model.relief import ALL_LOAD_BUSES
 
 DS_TOL = 1.0            # $/MWh; |S_full - S_slim| below this is numerical noise
 
@@ -34,9 +35,10 @@ def config_targets(case, relief_buses, bits, workers=None):
     """Per config over all snapshots: (S, active_buses, max_overload_mw, max_shed_mw).
 
     Every (config, snapshot) solve is independent, so this runs on the same worker pool
-    the sweep uses -- `relief_buses=None` puts a relief generator at every load bus.
+    the sweep uses.  `relief_buses` is the set under test, or ALL_LOAD_BUSES for the
+    full-relief baseline it is measured against.
     """
-    with evaluator.for_case(case, n_workers=workers, relief_buses=relief_buses) as ev:
+    with evaluator.for_case(case, relief_buses, n_workers=workers) as ev:
         averages, per_snapshot = ev.evaluate_detailed(bits)
     S = np.array([evaluator.scalar_target(a) for a in averages])
     active = [set().union(*(r.relief_buses for r in snaps)) for snaps in per_snapshot]
@@ -60,14 +62,15 @@ def select(case, collect=400, validate=200, seed=7, workers=None):
 
     collect_bits = sample_configs(ng, collect, np.random.default_rng(seed))
     print(f"collecting active relief buses: {len(collect_bits)} configs x {len(snapshots)} snapshots")
-    _, active_collect, _, shed_collect = config_targets(case, None, collect_bits, workers)
+    _, active_collect, _, shed_collect = config_targets(case, ALL_LOAD_BUSES, collect_bits,
+                                                        workers)
     relief_set = set().union(*active_collect)
     print(f"active relief buses in collection sample: {len(relief_set)}   "
           f"(full-relief system shed max {shed_collect.max():.2f} MW, should be ~0)")
 
     val_bits = sample_configs(ng, validate, np.random.default_rng(seed + 1))
     print(f"validating on {len(val_bits)} held-out configs (set frozen before their actives)")
-    S_full, active_val, ov_full, _ = config_targets(case, None, val_bits, workers)
+    S_full, active_val, ov_full, _ = config_targets(case, ALL_LOAD_BUSES, val_bits, workers)
     S_slim, _, ov_slim, shed_slim = config_targets(case, relief_set, val_bits, workers)
 
     dS = np.abs(S_full - S_slim)

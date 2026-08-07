@@ -199,8 +199,8 @@ def main():
           f"{'screened' if args.screened else 'full'} contingencies -> {out_dir}", flush=True)
 
     t0 = time.time()
-    with evaluator.for_case(case, n_workers=args.workers, screened=args.screened,
-                            threads=args.threads) as target:
+    with evaluator.for_case(case, case.relief_buses(), n_workers=args.workers,
+                            screened=args.screened, threads=args.threads) as target:
         mu_dir = sweep(case, target, bits, out_dir)
     print(f"done in {(time.time() - t0) / 3600:.2f} h -> {mu_dir}")
 
