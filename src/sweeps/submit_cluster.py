@@ -20,9 +20,11 @@ the reduction and the audit.  The links are chained rather than run side by side
 screened sweep rewrites its own contingency set as it discovers binders, and two jobs on
 one case would race for that file.  Cores are filled by the worker pool within a job.
 
-The chain still ends with the audit.  The sweep now grows its contingency set as it goes,
-so the audit is a check on a finished cache rather than the thing that makes it exact:
-it re-solves a selection of configurations and confirms no dropped contingency binds.
+The chain still ends with the audit, but it no longer carries the exactness argument: the
+sweep checks every solve against the dropped contingencies and grows its set when one is
+violated, so re-solving 500 of the swept configurations runs that same check a second time
+and must come back empty.  It is kept because it costs about a minute and it is the only
+thing that would notice the growth loop silently not running.
 """
 
 import math
@@ -45,10 +47,20 @@ PARTITION = "general"
 CPUS = 40
 LINKS = 2                 # chained sweep jobs per case, each continuing the last
 
+# Walltimes.  Only the sweep is long; the preparation steps are minutes to a couple of
+# hours, and an inflated request costs queue priority for nothing.  Counts below are the
+# defaults of each module; per-solve costs were measured on the development machine with
+# one Gurobi thread and the cluster ran faster, so these carry real margin.
 SWEEP_TIME = "30:00:00"   # per link; must be under the partition's cap
-RELIEF_TIME = "12:00:00"  # select_relief_set solves ~6400 configs serially
-SCREEN_TIME = "4:00:00"   # screen_contingencies solves 34 stress configs, full N-1 set
-AUDIT_TIME = "12:00:00"   # the audit re-solves and checks every dropped contingency
+# 806 configs x 8 snapshots = 6448 solves, serial in one process, against the full N-1 set
+# (screening has not run yet) and mostly at full relief -- ~1.0 s each, so ~2 h.
+RELIEF_TIME = "4:00:00"
+# 34 stress configs x 8 snapshots = 272 solves against the full N-1 set, but spread over
+# the whole node: ~7 solves per worker at ~0.8 s, plus a ~2 s model build.
+SCREEN_TIME = "0:30:00"
+# 500 configs x 8 snapshots = 4000 screened solves at ~80 ms including the check, spread
+# over the node, plus ~4 s per worker to build the full-contingency PTDF and its columns.
+AUDIT_TIME = "0:30:00"
 
 AUDIT_TOP = 100           # audit the configurations of largest max_mu ...
 AUDIT_RANDOM = 400        # ... and this many uniform draws standing for the rest
@@ -152,10 +164,10 @@ def submit_sweep(case, depend):
 
 
 def submit_audit(case, depend):
-    """Reduce the sweep, then check the contingencies screening dropped.
+    """Reduce the sweep, then re-check the contingencies screening dropped.
 
     Chained on `afterany` so it still runs on whatever the last link cached: an audit of
-    a partial sweep is still a proof about the configurations it covers.
+    a partial sweep is still a statement about the configurations it covers.
     """
     depend = sbatch(f"target-{case.name}", "src.sweeps.build_target_cache", case,
                     "2:00:00", depend=depend, kind="afterany")
