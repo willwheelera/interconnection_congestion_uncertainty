@@ -30,7 +30,7 @@ is **not** baked into the library: it is selected by name from the `CASES` regis
 | axis | values |
 |------|--------|
 | case | `case14_gen_per_bus`, `case30_gen_per_bus`, `activsg2000_original`, `activsg2000_2025`, `activsg2000_original_v12` |
-| nominal law (`dist`) | `bernoulli` (J=0), `mrf_a` (J~0.04, ferromagnetic), `mrf_b` (J~N(0,0.08), mixed-sign), `mrf_c` (J~N(0,0.15), mixed-sign). `COUPLED_NAMES` adds two structured laws, `mrf_cobuild` and `mrf_substitute` (below), selectable by `--dists` but not in the swept `DIST_NAMES` |
+| nominal law (`dist`) | `DIST_NAMES` = `bernoulli` (J=0), `mrf_a` (J~N(0,0.15), unstructured mixed-sign), and the two structured laws `mrf_cobuild` and `mrf_substitute` (below), which `STRUCTURED_NAMES` marks as needing the queue's fuel groups and so skips on a case without a queue. Every law's field is solved for the same marginals, so they differ in coupling alone |
 | target | `max_mu`, `sum_mu`, `one_mu`, `one_lmp` (whichever the case's cache carries). `one_mu` is a single element, named per case in `cases.registry` (table below); unnamed cases fall back to the globally most-congested element |
 | snapshot | `multi` (averaged/nominal); `single` runs `max_mu` on the per-snapshot peak (Texas only) |
 | ascent move | `all` always; `best` / `top5` only where a sensitivity proxy exists — in practice case14 only, since case30 has no `sensitivity_cache.parquet` (use `--proxy live` to get them there) |
@@ -39,13 +39,12 @@ is **not** baked into the library: it is selected by name from the `CASES` regis
 
 ### The structured laws (`mrf_cobuild`, `mrf_substitute`)
 
-`mrf_a/b/c` barely move the mu distribution: their coupling is an unstructured Gaussian
-draw spread thin over all `ngen*(ngen-1)/2` pairs, so the induced bit correlations stay
-under 0.05 and what little the tail does move comes partly from their marginals drifting
-(the mean-field field compensation is first order, so `mrf_c` misses its marginals by
-0.07). The two structured laws instead couple strongly *within a technology group*
-(`Case.candidate_groups()`, one block per fuel) at `GROUP_COUPLING = 2.0`, and solve for
-the field with `mrf.calibrate_field`, so their marginals match Bernoulli to 1e-12:
+`mrf_a` barely moves the mu distribution: its coupling is an unstructured Gaussian draw
+spread thin over all `ngen*(ngen-1)/2` pairs, so the induced bit correlations stay small
+(mean 0.010, max 0.046 on `activsg2000_original_v12`) and none of them line up with the
+handful of candidates a congested element responds to. The two structured laws instead
+couple strongly *within a technology group* (`Case.candidate_groups()`, one block per
+fuel) at `GROUP_COUPLING = 2.0`, reaching mean |corr| 0.08 with a max near 0.7:
 
 | law | coupling | story |
 |-----|----------|-------|
@@ -56,7 +55,7 @@ On `activsg2000_original_v12` these two put the same probability on every indivi
 candidate as Bernoulli and still separate `P[S > 1600]` by a factor of 117
 (`2.8e-4` vs `3.3e-2`, against Bernoulli's `4.6e-3`); on the `one_mu` element `ctg:68:18`
 at its 1e-3 level they separate by 135. `diagnostics/check_law_coupling.py` prints the
-table and `figures/tail/law_tail_compare.py` draws the curves.
+table and `figures/mu_distributions/law_tail_compare.py` draws the curves.
 
 ### The `one_mu` element
 
@@ -97,8 +96,8 @@ matched solver-call budget. The key is `(method, ascent_move)`.
 | file | role |
 |------|------|
 | `problem.py` | `Problem` / `TargetProblem` for one cached case: loads `S`, the nominal law (as a generic weight vector), exact ground truth, per-config targets, bit/id helpers; mints `Evaluator`s (call counter). Reads the case list from `cases.registry`. |
-| `distributions.py` | Named nominal laws over `ngen` bits: `make_dist` builds one from its parameters (`DIST_NAMES`, `COUPLED_NAMES`, `P_STD`); `case_dist` returns a registered case's stored law. |
-| `build_laws.py` | Builds each named law at a case's marginals and technology groups and stores it — the only place a field is ever solved. |
+| `distributions.py` | Named nominal laws over `ngen` bits. `marginal_vector` fixes the marginals, then `make_dist` lays the coupling keyed by name on top (`DIST_NAMES`, `STRUCTURED_NAMES`, `P_STD`); `case_dist` returns a registered case's stored law and `case_law_names` filters a requested list down to what a case can have. |
+| `build_laws.py` | Builds each named law at a case's marginals and technology groups and stores it — the only place a field is ever solved. Every coupled law's field comes from `mrf.calibrate_field`, so its marginals match Bernoulli's to solver precision. |
 | `law_store.py` | Reads and writes a law's full definition, `results/<case>/laws/<name>.json`: `h`, `J`, target and realized marginals, groups, coupling. |
 | `mrf.py` | `MarkovRandomField` (pairwise binary MRF) — the only file that knows the law's form; `calibrate_field` solves for the field that reproduces given marginals under a given coupling. |
 | `diagnostics.check_law_coupling` | Per-law marginal error, bit correlations, distance to Bernoulli, and exact mu exceedance — the check that two laws differ in correlation only. |
@@ -129,11 +128,11 @@ is tagged into the output filename, so a restricted figure never overwrites the 
 
 | file | shows |
 |------|-------|
-| `figures/tail/inverse_cdf.py` | Single-axis exceedance curve `P[target >= b]` per sampler vs truth, for one `(dist, target, snapshot, budget)` slice. |
-| `figures/tail/target_grid.py` | Grid of the same overlay: rows = distribution, cols = target. |
-| `figures/tail/per_line_survivor.py` | Grid of per-line congestion-dual survivor curves `P[|mu_l| > mu_hat]` (the quantity of interest; the target is only the sampling driver). `--kind qq` draws the per-line QQ view. |
-| `figures/tail/line_exceed_strip.py` | Per-line jittered strip of the tail probability `P[|mu_l| > c]` across the matrix. |
-| `figures/tail/target_line_strip.py` | The same strip for the single `one_mu` line only, with the four nominal laws as panels: per-replicate `P[|mu_l| > c]` by sampler against the exact truth. `c` defaults to the level that line exceeds with probability `--at` (default `1e-2`), so it auto-scales across cases. Sized 3.4 in wide for a single document column / slide at 1:1. |
+| `figures/mu_distributions/inverse_cdf.py` | Single-axis exceedance curve `P[target >= b]` per sampler vs truth, for one `(dist, target, snapshot, budget)` slice. |
+| `figures/mu_distributions/target_grid.py` | Grid of the same overlay: rows = distribution, cols = target. |
+| `figures/mu_distributions/per_line_survivor.py` | Grid of per-line congestion-dual survivor curves `P[|mu_l| > mu_hat]` (the quantity of interest; the target is only the sampling driver). `--kind qq` draws the per-line QQ view. |
+| `figures/mu_distributions/line_exceed_strip.py` | Per-line jittered strip of the tail probability `P[|mu_l| > c]` across the matrix. |
+| `figures/mu_distributions/target_line_strip.py` | The same strip for the single `one_mu` line only, with the four nominal laws as panels: per-replicate `P[|mu_l| > c]` by sampler against the exact truth. `c` defaults to the level that line exceeds with probability `--at` (default `1e-2`), so it auto-scales across cases. Sized 3.4 in wide for a single document column / slide at 1:1. |
 
 ## Outputs
 
@@ -141,10 +140,10 @@ is tagged into the output filename, so a restricted figure never overwrites the 
 
 - `experiment_curves.parquet` — tidy inverse-CDF frame, columns `case, dist, target,
   snapshot, budget, method, ascent_move, rep, threshold, estimate` (method `"truth"`
-  carries the exact curve). Read by `figures.tail.inverse_cdf`, `figures.tail.target_grid`.
+  carries the exact curve). Read by `figures.mu_distributions.inverse_cdf`, `figures.mu_distributions.target_grid`.
 - `experiment_samples.parquet` — the raw weighted samples behind those curves, so
   evaluation can score any per-config quantity (e.g. per-line `mu`) from one run. Read
-  by `figures.tail.per_line_survivor`, `figures.tail.line_exceed_strip`.
+  by `figures.mu_distributions.per_line_survivor`, `figures.mu_distributions.line_exceed_strip`.
 
 ## Running
 
@@ -165,8 +164,8 @@ uv run python -m src.sampling.run_experiments --case all --n-rep 40 --budgets 64
 # extend an existing sweep with more ascent-IS defensive weights (tops the shards up)
 uv run python -m src.sampling.run_experiments --case activsg2000_original_v12 --betas 0.5,0.8
 
-uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus
-uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus
-uv run python -m src.figures.tail.target_grid --case activsg2000_original_v12 \
+uv run python -m src.figures.mu_distributions.inverse_cdf --case case14_gen_per_bus
+uv run python -m src.figures.mu_distributions.per_line_survivor --case case14_gen_per_bus
+uv run python -m src.figures.mu_distributions.target_grid --case activsg2000_original_v12 \
     --methods direct,ascent_is
 ```

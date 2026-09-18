@@ -53,7 +53,7 @@ def report(df, candidates):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     case = registry.get(parser.parse_args().case)
     out = case.results_dir / "queue_dispatch.parquet"
 

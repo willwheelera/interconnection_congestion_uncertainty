@@ -22,9 +22,10 @@ import argparse
 
 import numpy as np
 
-from src.cases.registry import CASES, add_case_arg
+from src.cases.registry import CASES
 from src.sampling.problem import TargetProblem
-from src.sampling.distributions import case_dist, DIST_NAMES, COUPLED_NAMES
+from src.sampling.distributions import (P_STD, case_dist, case_law_names, DIST_NAMES,
+                                        marginal_vector)
 
 
 def law_weights(case, dists):
@@ -93,8 +94,9 @@ def print_line_table(weights, mu, names, at, n_lines):
 
 def main():
     parser = argparse.ArgumentParser()
-    add_case_arg(parser, default="activsg2000_original_v12")
-    parser.add_argument("--dists", default=",".join(DIST_NAMES + COUPLED_NAMES))
+    parser.add_argument("--case", default="activsg2000_original_v12",
+                        help="a registered case name")
+    parser.add_argument("--dists", default=",".join(DIST_NAMES))
     parser.add_argument("--thresholds", default="1200,1400,1600,1800,2000",
                         help="target levels the exact exceedance is reported at")
     parser.add_argument("--at", type=float, default=1e-3,
@@ -104,9 +106,9 @@ def main():
 
     case = CASES[args.case]
     thresholds = [float(t) for t in args.thresholds.split(",")]
-    weights, problem = law_weights(case, args.dists.split(","))
+    weights, problem = law_weights(case, case_law_names(case, args.dists.split(",")))
     bits = problem.to_binary(np.arange(problem.nconf)).astype(float)
-    p = np.asarray(case.nominal_p(), float)
+    p = marginal_vector(case.ngen, case.nominal_p(), P_STD ** 2)
     mu, names = problem.mu_table()
 
     print(f"{case.name}: {problem.nconf} configurations, "

@@ -19,10 +19,10 @@ The last four read the sampling experiment and so cover only the laws it was run
 first two are pure enumeration and work for any law in the registry.
 
 Usage:
-    uv run python -m src.figures.tail.per_line_figures --case case30_gen_per_bus
-    uv run python -m src.figures.tail.per_line_figures --case activsg2000_original_v12 \
-        --dists bernoulli,mrf_c --threshold 200 --budget 2560
-    uv run python -m src.figures.tail.per_line_figures --case activsg2000_original_v12 \
+    uv run python -m src.figures.mu_distributions.per_line_figures --case case30_gen_per_bus
+    uv run python -m src.figures.mu_distributions.per_line_figures --case activsg2000_original_v12 \
+        --dists bernoulli,mrf_a --threshold 200 --budget 2560
+    uv run python -m src.figures.mu_distributions.per_line_figures --case activsg2000_original_v12 \
         --dists mrf_cobuild,mrf_substitute --only exact_mu_distribution,top_config_mu
 """
 
@@ -30,16 +30,17 @@ import argparse
 
 import matplotlib.pyplot as plt
 
-from src.cases.registry import add_case_arg
-from src.sampling.problem import REPO_ROOT, experiment_meta
-from src.figures.tail import (direct_box, direct_inverse_cdf, exact_mu_distribution,
+from src.cases.registry import get_case
+from src.sampling.problem import experiment_meta
+from src.figures.mu_distributions import (direct_box, direct_inverse_cdf, exact_mu_distribution,
                           line_exceed_strip, per_line_survivor, top_config_mu)
 
 
 def parse_args():
     """The parameters every per-line figure is drawn with, with the lists already split."""
     parser = argparse.ArgumentParser()
-    add_case_arg(parser, default="activsg2000_original_v12")
+    parser.add_argument("--case", default="activsg2000_original_v12",
+                        help="a registered case name")
     parser.add_argument("--dists", default="mrf_cobuild,mrf_substitute")
     parser.add_argument("--targets", default="max_mu,sum_mu")
     parser.add_argument("--budgets", default=None,
@@ -63,12 +64,13 @@ def parse_args():
 
 def main():
     args = parse_args()
-    meta = experiment_meta(REPO_ROOT / "results" / args.case, "samples")
+    c = get_case(args.case)
+    meta = experiment_meta(c.results_dir, "samples")
     budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else meta["budgets"]
     budget = args.budget or max(budgets)
     v = vars(args)
     params = lambda l: {k: v[k] for k in l}
-    a = [args.case, args.dists]
+    a = [c.name, args.dists]
 
     exact_mu_distribution.run(*a, **params(["n_lines", "mu_floor"]))
     top_config_mu.run(*a, **params(["threshold", "n_lines", "n_configs"]))

@@ -18,10 +18,10 @@ with a 45-degree identity line.  Points off the diagonal at large |mu| show a sa
 recovers the wrong tail value (or never reaches it), complementing the survivor overlay.
 
 Usage:
-    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus \
+    uv run python -m src.figures.mu_distributions.per_line_survivor --case case14_gen_per_bus \
         --dists bernoulli --targets max_mu --budgets 640
-    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus  # every law
-    uv run python -m src.figures.tail.per_line_survivor --case case14_gen_per_bus --kind qq
+    uv run python -m src.figures.mu_distributions.per_line_survivor --case case14_gen_per_bus  # every law
+    uv run python -m src.figures.mu_distributions.per_line_survivor --case case14_gen_per_bus --kind qq
 """
 
 import argparse
@@ -29,52 +29,20 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.sampling.problem import TargetProblem, REPO_ROOT, load_experiment, CASES, case_tag
-from src.sampling.distributions import DIST_NAMES, DIST_LABEL, case_dist
+from src.cases.registry import get_case
+from src.sampling.problem import load_experiment, case_tag, create_problem
+from src.sampling.distributions import DIST_NAMES, DIST_LABEL
 from src.figures.style import (DEFAULT_METHODS, MOVE_STYLE, method_color, series_label,
                            select_methods, series_tag, add_method_args, method_selection)
+from src.figures.mu_distributions._line_stats import (weighted_survivor, decimate_monotone, select_lines,
+                                         weighted_quantiles)
+from src.figures.mu_distributions._panel_layout import panel_title
 
 BOOT_PCT = 95 #  bootstrap interval
 _BOOT_PCT = (50 - BOOT_PCT / 2, 50 + BOOT_PCT / 2)
 N_BOOT = 400
 N_GRID = 250
 QQ_PROBS = np.logspace(np.log10(0.9), -6, 80)          # exceedance levels for the QQ panels
-
-
-def weighted_survivor(values, weights):
-    """Return (sorted values, proportion of weight with value > each)."""
-    order = np.argsort(values)
-    v = values[order]
-    cumw = np.zeros(weights.shape)
-    cumw[1:] = np.cumsum(weights[order])[:-1]
-    return v, 1.0 - cumw / cumw[-1]
-
-
-def decimate_monotone(v, s, nbins=4000):
-    """Thin a monotone survivor curve to <=~2*nbins points without visible change.
-
-    s(v) is non-increasing, so per x-bin the first/last points are the y-extremes;
-    keeping them reproduces the rendered polyline to within one bin in x (chosen
-    finer than screen pixels), fabricating no information.  The dense head collapses
-    while every sparse-tail point lands in its own bin and is kept verbatim."""
-    if v.size <= 2 * nbins:
-        return v, s
-    span = v[-1] - v[0]
-    if span <= 0:
-        return v[[0, -1]], s[[0, -1]]
-    bins = np.floor((v - v[0]) / span * nbins).astype(np.int64)
-    change = bins[1:] != bins[:-1]
-    keep = np.zeros(v.size, bool)
-    keep[0] = keep[-1] = True
-    keep[1:] |= change                                      # first point of each bin
-    keep[:-1] |= change                                     # last point of each bin
-    return v[keep], s[keep]
-
-
-def line_order(mu, line_names, weights):
-    """All lines, ordered by descending E[|mu|] = sum(mu*p) so the congested ones lead the grid."""
-    idx = np.argsort(-(weights[:, None] * mu).sum(0))
-    return idx, [line_names[i] for i in idx]
 
 
 def survivor_on_grid(values, weights, grid):
@@ -112,7 +80,7 @@ def panel(ax, line_idx, line_name, mu, truth_w, slice_samples):
         v, s = decimate_monotone(*weighted_survivor(mu[ids, line_idx], w))
         ax.plot(v, s, color=method_color(method), lw=1.1,
                 linestyle=MOVE_STYLE[move], label=series_label(method, move), rasterized=True)
-    ax.set_title(f"line {line_name}", y=0.80, x=0.5, fontsize=8)
+    panel_title(ax, f"line {line_name}", y=0.80)      # curve fills the top; sit the label lower
 
 
 def figure_for_slice(mu, line_names, truth_w, slice_samples, title, xmax=None):
@@ -121,7 +89,7 @@ def figure_for_slice(mu, line_names, truth_w, slice_samples, title, xmax=None):
     xmax defaults to the data's own |mu| range so a case whose dominant line greatly
     exceeds the synthetic cases' scale (e.g. Texas ctg:68:18 ~2000) is not clipped."""
     xmax = float(mu.max()) * 1.02 if xmax is None else xmax
-    idx, names = line_order(mu, line_names, truth_w)
+    idx, names = select_lines(mu, line_names, truth_w)
     ncol = 5
     nrow = int(np.ceil(len(idx) / ncol))
     fig, axs = plt.subplots(nrow, ncol, figsize=(ncol * 1.9, nrow * 1.7),
@@ -148,12 +116,6 @@ def figure_for_slice(mu, line_names, truth_w, slice_samples, title, xmax=None):
     return fig
 
 
-def weighted_quantiles(values, weights, probs):
-    """Value q with weighted P[|mu_l| > q] = p, for each exceedance level p in probs."""
-    v, s = weighted_survivor(values, weights)
-    return np.interp(probs, s[::-1], v[::-1])
-
-
 def qq_panel(ax, line_idx, line_name, mu, truth_w, slice_samples, probs):
     """One line's QQ: sampler quantile vs exact truth quantile at matched exceedance levels."""
     qt = weighted_quantiles(mu[:, line_idx], truth_w, probs)
@@ -167,12 +129,12 @@ def qq_panel(ax, line_idx, line_name, mu, truth_w, slice_samples, probs):
     mumax = mu.max()
     ax.plot([0, mumax], [0, mumax], color="k", lw=0.5, ls="-", label="identity (= truth)")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(f"line {line_name}", y=0.80, x=0.5, fontsize=8)
+    panel_title(ax, f"line {line_name}", y=0.80)      # curve fills the top; sit the label lower
 
 
 def qq_figure_for_slice(mu, line_names, truth_w, slice_samples, title, probs=QQ_PROBS):
     """A grid of per-line QQ panels; each panel has its own linear scale and 45-degree line."""
-    idx, names = line_order(mu, line_names, truth_w)
+    idx, names = select_lines(mu, line_names, truth_w)
     ncol = 5
     nrow = int(np.ceil(len(idx) / ncol))
     fig, axs = plt.subplots(nrow, ncol, figsize=(ncol * 1.9, nrow * 1.9), squeeze=False, sharex=True, sharey=True)
@@ -200,12 +162,12 @@ def run(case, dists, targets=None, budgets=None, snapshot="multi", kind="survivo
     """One figure per (dist, target, budget) slice present in the experiment; returns them.
 
     A slice the experiment never ran is skipped rather than drawn empty."""
-    case_dir = REPO_ROOT / "results" / case
+    c = get_case(case)
+    case, case_dir = c.name, c.results_dir
     samples, meta = load_experiment(case_dir, "samples")
     samples = samples[samples["method"].isin(
         select_methods(samples["method"].unique(), methods))]
-    problems = {d: TargetProblem(case_dir / "target_cache.parquet",
-                                 dist=case_dist(CASES[case], d)) for d in dists}
+    problems = {d: create_problem(c, d) for d in dists}
     mu, line_names = next(iter(problems.values())).mu_table()
     budgets = budgets or meta["budgets"]
 
@@ -232,9 +194,9 @@ def run(case, dists, targets=None, budgets=None, snapshot="multi", kind="survivo
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="activsg2000_original_v12")
+    parser.add_argument("--case", default="activsg2000_v12_lev3a3")
     parser.add_argument("--dists", default=",".join(DIST_NAMES))
-    parser.add_argument("--targets", default="max_mu")
+    parser.add_argument("--targets", default="sum_mu")
     parser.add_argument("--snapshot", default="multi")
     parser.add_argument("--budgets", default=None)
     parser.add_argument("--kind", default="survivor", choices=["survivor", "qq"])

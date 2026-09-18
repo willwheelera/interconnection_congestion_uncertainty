@@ -25,4 +25,9 @@ cd "$SLURM_SUBMIT_DIR"
 
 # --no-sync: the environment is built once on the login node by `uv sync`, so a compute
 # node that cannot reach GitHub fails here in seconds rather than mid-job.
-uv run --no-sync python -m "$JOB_MODULE" --case "$JOB_CASE" "$@"
+#
+# -u: stdout to a file is block-buffered, so a job killed outright -- walltime, out of
+# memory, node failure -- discards whatever it had printed and leaves an empty .out.  A
+# Python error always writes its traceback, so an empty file means a kill; unbuffered
+# output makes the job say how far it got before one.
+uv run --no-sync python -u -m "$JOB_MODULE" --case "$JOB_CASE" "$@"

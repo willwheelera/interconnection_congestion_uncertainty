@@ -93,7 +93,7 @@ def select(case, collect=400, validate=200, seed=7, workers=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    registry.add_case_arg(ap)
+    ap.add_argument("--case", required=True, help="a registered case name")
     ap.add_argument("--collect", type=int, default=400)
     ap.add_argument("--validate", type=int, default=200)
     ap.add_argument("--workers", type=int, default=None)

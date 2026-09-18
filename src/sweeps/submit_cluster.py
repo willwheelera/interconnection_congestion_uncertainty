@@ -12,11 +12,23 @@ Each case becomes a short chain of Slurm jobs:
 whichever already exists; it is one job because neither step is long.  Both depend on the
 queue, so a new queue gets its own pair rather than inheriting another case's.
 
+`PREP_ONLY` stops after that job: it submits only relief selection and screening, not the
+sweep -- for a case (such as the 2^28 q28 queue) whose sweep strategy is decided only once
+its screened contingency set is known.
+
+A `sample_only` case (the full leveraged queue, 2^195) is never enumerated.  After the same
+preparation job it runs `sampling.mcmc_sweep` instead of `enumerate_configs`: one resumable
+MCMC chain per law in `SAMPLE_LAWS`, each self-stopping at `MCMC_MAX_HOURS` and picked up by
+the next link from its `state.json`.  There is no target reduction -- the sampler writes its
+own per-round output.  Its stored laws (`data/<case>_law_*.json`, built locally by
+`sampling.build_laws_mcmc` and tracked like the relief set) must be synced to the cluster.
+
 The sweep skips chunks that are already cached, so a job stopped at the walltime is
 continued by the next link, and a case whose enumeration is already complete gets only the
 reduction.  The links are chained rather than run side by side: a screened sweep rewrites
 its own contingency set as it discovers binders, and two jobs on one case would race for
-that file.  Cores are filled by the worker pool within a job.
+that file.  The MCMC laws chain for the same reason -- they share the one screened set.
+Cores are filled by the worker pool within a job.
 
 There is no audit job.  The sweep checks every solve against the contingencies screening
 dropped and grows its set whenever one is violated, so the cache is exact when it is
@@ -33,7 +45,7 @@ from src.sweeps.enumerate_configs import CHUNK
 
 # ----------------------------------------------------------------- settings
 
-CASES = ["activsg2000_v12_lev0"]   # registered names; see src/cases/registry.py
+CASES = ["activsg2000_v12_levfull"]   # registered names; see src/cases/registry.py
 
 PARTITION = "general"
 # Cores per task.  The evaluator fills them with single-threaded workers: CPUS // 8 on
@@ -51,7 +63,15 @@ SWEEP_TIME = "30:00:00"   # per link; must be under the partition's cap
 PREP_TIME = "1:00:00"     # relief selection and screening together
 
 SCREENED = True           # solve the screened N-1 set, growing it as the sweep runs
+PREP_ONLY = False         # submit only relief selection + screening, not the sweep
 DRY_RUN = False           # True prints the sbatch commands instead of submitting
+
+# Sample-only cases (sample_only in the registry) draw from these laws by MCMC instead of
+# enumerating.  Each law is a resumable chain that self-stops at MCMC_MAX_HOURS -- set a
+# little under SWEEP_TIME so the checkpoint is written before Slurm kills the job.  The
+# laws must be built first, locally: `python -m src.sampling.build_laws_mcmc --case <name>`.
+SAMPLE_LAWS = ["bernoulli", "mrf_cobuild", "mrf_substitute"]
+MCMC_MAX_HOURS = 29.0
 
 # TEST replaces the enumeration with one short job over a few hundred random
 # configurations, written to results/<case>_random/.  Run it once on a new cluster:
@@ -147,6 +167,27 @@ def submit_sweep(case, depend):
     return depend
 
 
+def submit_mcmc(case, depend):
+    """One resumable MCMC chain per law for a sample-only case, the laws chained.
+
+    Each law's `mcmc_sweep` writes its own results/<case>/mcmc/<law>/, but they all grow the
+    single screened contingency set as they solve, so two at once would race for it -- the
+    same reason the enumeration links are chained.  Within a law, LINKS jobs each resume the
+    last one's `state.json` and sample another `MCMC_MAX_HOURS`; the first job of the whole
+    chain waits on preparation, every job after it on the one before (`afterany`, so a link
+    that hits the walltime is still continued).
+    """
+    screened = ["--screened"] if SCREENED else []
+    kind = "afterok"
+    for law in SAMPLE_LAWS:
+        args = ["--law", law, "--max-hours", str(MCMC_MAX_HOURS), *screened]
+        for _ in range(LINKS):
+            depend = sbatch(f"mcmc-{law}-{case.name}", "src.sampling.mcmc_sweep", case,
+                            SWEEP_TIME, depend=depend, kind=kind, args=args)
+            kind = "afterany"
+    return depend
+
+
 def submit_target(case, depend):
     """Reduce the sweep's per-dual cache to the scalar target every sampler reads.
 
@@ -162,6 +203,16 @@ def main():
     for name in CASES:
         case = registry.get(name)
         check_inputs(case)
+        if PREP_ONLY:
+            if prepare(case) is None:
+                print("  relief set and screened contingencies already present; "
+                      "nothing to prepare")
+            continue
+        if case.sample_only:
+            print(f"  sample-only: MCMC over {SAMPLE_LAWS}, {LINKS} links of "
+                  f"{SWEEP_TIME} (<= {MCMC_MAX_HOURS} h each) per law")
+            submit_mcmc(case, prepare(case))
+            continue
         if TEST:
             print(f"  test job: {TEST_CONFIGS} random configs -> {case.name}_random")
             submit_sweep(case, prepare(case))

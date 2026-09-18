@@ -59,7 +59,7 @@ import numpy as np
 
 from src.cases import registry
 from src.descriptors.compute import DEFAULT_BASE, descriptors
-from src.sampling.distributions import nominal_law
+from src.sampling.distributions import case_dist
 from src.sampling.problem import Problem
 
 # The cases the study reports on, with the congestion regime each one turned out to show.
@@ -112,7 +112,7 @@ def parse_target(argv):
 
 def load_target(case, keys, target):
     """The selected nominal-weighted per-element target statistic (what sampling recovers)."""
-    prob = Problem(case.results_dir, dist=nominal_law(case))
+    prob = Problem(case.results_dir, dist=case_dist(case, "bernoulli"))
     mu_table, cols = prob.mu_table()
     idx = [cols.index(k) for k in keys]
     return target.reduce(mu_table, prob.w)[idx]

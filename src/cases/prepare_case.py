@@ -6,9 +6,9 @@ case's recipe, and the recipe includes its relief set.
 
 They run as one job because neither is long.  Relief selection is 806 configurations x the
 case's snapshots, screening is 34, and both are spread over the whole node by the same
-worker pool the sweep uses: together minutes to a couple of hours against a sweep measured
-in tens.  A step whose output already exists is skipped, so re-running this after adding
-only a queue costs only what is actually missing.
+worker pool the sweep uses: 3.0-3.5 minutes at 40 cores on the ACTIVSg2000 cases, against a
+sweep measured in hours.  A step whose output already exists is skipped, so re-running this
+after adding only a queue costs only what is actually missing.
 
 Usage:
     uv run python -m src.cases.prepare_case --case activsg2000_v12_lev0
@@ -37,7 +37,7 @@ def prepare(case, collect, validate, n_stress, workers, seed):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     parser.add_argument("--collect", type=int, default=400)
     parser.add_argument("--validate", type=int, default=200)
     parser.add_argument("--n-stress", type=int, default=32)

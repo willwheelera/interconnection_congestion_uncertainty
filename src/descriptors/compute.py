@@ -21,13 +21,14 @@ the sweep exactly:
     proportion to its dispatch at the base configuration.
 
 Either way the base configuration is a choice: "off" builds nothing, "on" builds every
-candidate, and "modal" is the most probable configuration under the case's nominal law
-(`sampling.distributions.nominal_law`), found by enumeration rather than by thresholding
-the marginals so that a coupled law's mode is the real one.  The modal base is the default
-because it is the only one guaranteed to carry nominal probability mass: a queue is
-unlikely to build out -- E[candidates online] is 5.4 of 20 on Texas, so "on" is far
-outside the mass -- while on the gen-per-bus testbeds, whose law has no queue and favors
-availability, the mode *is* all-on and the modal base reproduces the earlier choice.
+candidate, and "modal" is the most probable configuration under the case's stored
+Bernoulli law (`case_dist(case, "bernoulli")`), found by enumeration rather than by
+thresholding the marginals so that the mode stays the real one if the law is ever
+swapped for a coupled one.  The modal base is the default because it is the only one
+guaranteed to carry nominal probability mass: a queue is unlikely to build out --
+E[candidates online] is 5.4 of 20 on Texas, so "on" is far outside the mass -- and on the
+gen-per-bus testbeds the mode is the 11 of 14 (case14) or 15 of 20 (case30) candidates
+whose marginal clears 0.5.
 
 Descriptors are averaged over the case's load snapshots, matching the load averaging of the
 mu target, and written with that configuration's load-averaged mu to
@@ -47,7 +48,7 @@ from egret.model_library.transmission.tx_calc import calculate_ptdf
 
 from src.cases import registry
 from src.model.scdcopf import build_persistent
-from src.sampling.distributions import nominal_law
+from src.sampling.distributions import case_dist
 from src.sampling.mrf import modal_config
 from src.utils.availability import avail_to_id
 
@@ -62,7 +63,7 @@ def base_config(case, base):
         return [0] * case.ngen
     if base == "on":
         return [1] * case.ngen
-    return modal_config(nominal_law(case)).tolist()
+    return modal_config(case_dist(case, "bernoulli")).tolist()
 
 
 def parse_constraint(cid):
@@ -215,7 +216,7 @@ def descriptors(case, base=DEFAULT_BASE):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     parser.add_argument("--base", default=DEFAULT_BASE, choices=BASES)
     args = parser.parse_args()
     case = registry.get(args.case)

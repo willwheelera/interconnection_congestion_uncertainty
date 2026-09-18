@@ -87,11 +87,11 @@ def build(case, top, threshold):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="all", allow_all=True)
+    parser.add_argument("--case", default="all", help="a case name, a name substring, or 'all'")
     parser.add_argument("--top", type=int, default=25)
     parser.add_argument("--threshold", type=float, default=None)
     args = parser.parse_args()
-    for case in registry.resolve(args.case):
+    for case in registry.get_cases(args.case):
         if case.ingest != "long":
             continue
         build(case, args.top, args.threshold)

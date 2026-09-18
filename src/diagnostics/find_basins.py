@@ -74,7 +74,7 @@ def plot_basins(stats, out):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     case = registry.get(parser.parse_args().case)
     S, n_on, n = load_target(case.target_cache)
     ascent = steepest_neighbor(S, n)

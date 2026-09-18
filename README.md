@@ -117,7 +117,7 @@ uv run python -m src.sweeps.build_dual_cache    --case case30_queue
 
 # estimate, describe, draw
 uv run python -m src.sampling.run_experiments        --case case30_queue
-uv run python -m src.figures.tail.per_line_survivor  --case case30_queue
+uv run python -m src.figures.mu_distributions.per_line_survivor  --case case30_queue
 uv run python -m src.figures.descriptors
 ```
 
@@ -126,7 +126,7 @@ The sensitivity thread runs separately:
 ```bash
 uv run python -m src.sensitivity.barrier --dir case14_gen_per_bus        # barrier dmu/dP, dLMP/dP
 uv run python -m src.sensitivity.finite_difference                       # finite-difference cross-check
-uv run python -m src.figures.sensitivity results/sensitivity_barrier_<case>.json
+uv run python -m src.figures.sensitivity.sensitivity results/sensitivity_barrier_<case>.json
 ```
 
 ## Methods

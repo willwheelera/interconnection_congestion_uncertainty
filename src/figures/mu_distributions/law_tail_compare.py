@@ -8,12 +8,12 @@ matters.  Two panels, both exact by enumeration:
   right   survivor curve of the element the laws disagree on most, other than the one
           driving S -- the check that the separation is not confined to a single element
 
-The unstructured laws (mrf_a/b/c) sit on top of the Bernoulli curve; the two structured
+The unstructured law (mrf_a) sits on top of the Bernoulli curve; the two structured
 laws pull the tail apart in opposite directions.
 
 Usage:
-    uv run python -m src.figures.tail.law_tail_compare --case activsg2000_original_v12
-    uv run python -m src.figures.tail.law_tail_compare --case activsg2000_original_v12 \
+    uv run python -m src.figures.mu_distributions.law_tail_compare --case activsg2000_original_v12
+    uv run python -m src.figures.mu_distributions.law_tail_compare --case activsg2000_original_v12 \
         --dists bernoulli,mrf_cobuild,mrf_substitute
 """
 
@@ -22,13 +22,12 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.cases.registry import CASES, add_case_arg
-from src.sampling.problem import TargetProblem, case_tag
-from src.sampling.distributions import case_dist, DIST_NAMES, COUPLED_NAMES, DIST_LABEL
+from src.cases.registry import get_case
+from src.sampling.problem import case_tag, create_problem
+from src.sampling.distributions import DIST_NAMES, DIST_LABEL
 
-LAW_STYLE = {"bernoulli": ("k", "-"), "mrf_a": ("0.55", "-"), "mrf_b": ("0.55", "--"),
-             "mrf_c": ("0.55", ":"), "mrf_cobuild": ("tab:blue", "-"),
-             "mrf_substitute": ("tab:red", "-")}
+LAW_STYLE = {"bernoulli": ("k", "-"), "mrf_a": ("0.55", "-"),
+             "mrf_cobuild": ("tab:blue", "-"), "mrf_substitute": ("tab:red", "-")}
 
 
 def survivor(values, w, levels):
@@ -104,16 +103,16 @@ def plot_laws(case, weights, problem, floor, n_levels, at=1e-3):
 
 def main():
     parser = argparse.ArgumentParser()
-    add_case_arg(parser, default="activsg2000_original_v12")
-    parser.add_argument("--dists", default=",".join(DIST_NAMES + COUPLED_NAMES))
+    parser.add_argument("--case", default="activsg2000_original_v12",
+                        help="a registered case name")
+    parser.add_argument("--dists", default=",".join(DIST_NAMES))
     parser.add_argument("--floor", type=float, default=1e-6,
                         help="smallest exceedance probability the y axis shows")
     parser.add_argument("--n-levels", type=int, default=120)
     args = parser.parse_args()
 
-    case = CASES[args.case]
-    problems = {d: TargetProblem(case.target_cache, dist=case_dist(case, d))
-                for d in args.dists.split(",")}
+    case = get_case(args.case)
+    problems = {d: create_problem(case, d) for d in args.dists.split(",")}
     weights = {d: pr.w for d, pr in problems.items()}
     fig = plot_laws(case, weights, next(iter(problems.values())), args.floor, args.n_levels)
 

@@ -224,7 +224,7 @@ def report(df):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="activsg2000_2025")
+    parser.add_argument("--case", default="activsg2000_2025", help="a registered case name")
     parser.add_argument("--caps", nargs="*", type=float, default=None,
                         help="cap rungs to scan; omit for the default ladder")
     parser.add_argument("--configs", nargs="*", default=["off", "on"],

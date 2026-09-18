@@ -8,10 +8,10 @@ identically here and there -- including the sampler selection, `direct` and asce
 beta 0.2 by default (see figures.style).
 
 Usage:
-    uv run python -m src.figures.tail.target_grid --case case14_gen_per_bus
-    uv run python -m src.figures.tail.target_grid --case case14_gen_per_bus \
+    uv run python -m src.figures.mu_distributions.target_grid --case case14_gen_per_bus
+    uv run python -m src.figures.mu_distributions.target_grid --case case14_gen_per_bus \
         --targets max_mu,sum_mu --budgets 640,2560
-    uv run python -m src.figures.tail.target_grid --case activsg2000_original_v12 \
+    uv run python -m src.figures.mu_distributions.target_grid --case activsg2000_original_v12 \
         --methods direct,ascent_is
 """
 
@@ -20,13 +20,14 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.sampling.problem import REPO_ROOT, load_experiment, case_tag
+from src.cases.registry import get_case
+from src.sampling.problem import load_experiment, case_tag
 from src.sampling.distributions import DIST_LABEL
 from src.figures.style import (MOVE_STYLE, band, method_color, series_label, series_tag,
                            selection_label, add_method_args, method_selection)
-from src.figures.tail.inverse_cdf import load_slice, select_series
+from src.figures.mu_distributions._experiment_reads import load_slice, select_series
 
-DISTS = ["bernoulli", "mrf_a", "mrf_b", "mrf_c"]
+DISTS = ["bernoulli", "mrf_a", "mrf_cobuild", "mrf_substitute"]
 
 
 def panel(ax, case_dir, dist, target, budget, methods):
@@ -73,7 +74,8 @@ def main():
     args = parser.parse_args()
     methods = method_selection(args)
 
-    case_dir = REPO_ROOT / "results" / args.case
+    c = get_case(args.case)
+    case_dir = c.results_dir
     meta = load_experiment(case_dir, "curves")[1]
     targets = args.targets.split(",")
     budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else meta["budgets"]
@@ -81,7 +83,7 @@ def main():
     for budget in budgets:
         fig = figure_for_budget(case_dir, targets, budget, meta, methods)
         out = (case_dir / f"target_grid_b{budget}{series_tag(methods)}_"
-                          f"{case_tag(args.case)}.pdf")
+                          f"{case_tag(c.name)}.pdf")
         fig.savefig(out)
         print(f"saved -> {out}")
     plt.show()

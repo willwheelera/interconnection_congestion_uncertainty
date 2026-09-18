@@ -150,9 +150,9 @@ def build_case(case):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="all", allow_all=True)
+    parser.add_argument("--case", default="all", help="a case name, a name substring, or 'all'")
     args = parser.parse_args()
-    for case in registry.resolve(args.case):
+    for case in registry.get_cases(args.case):
         build_case(case)
 
 

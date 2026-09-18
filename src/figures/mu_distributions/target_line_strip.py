@@ -17,14 +17,14 @@ on its own c, and c is reported in the panel title -- unless --threshold pins on
 target_line_strip() takes every option as a plain python argument, so the figure can be
 built from a session or another script without going through the command line:
 
-    from src.figures.tail.target_line_strip import target_line_strip
+    from src.figures.mu_distributions.target_line_strip import target_line_strip
     fig, specs, out = target_line_strip("case30_gen_per_bus", at=1e-3)
     fig, specs, _ = target_line_strip("activsg2000_original_v12", budgets=[2560], save=False)
 
 main() only parses the equivalent command line and hands off to it:
 
-    uv run python -m src.figures.tail.target_line_strip --case case14_gen_per_bus
-    uv run python -m src.figures.tail.target_line_strip --case activsg2000_original_v12 \
+    uv run python -m src.figures.mu_distributions.target_line_strip --case case14_gen_per_bus
+    uv run python -m src.figures.mu_distributions.target_line_strip --case activsg2000_original_v12 \
         --at 1e-4 --targets one_mu,max_mu
 """
 
@@ -39,12 +39,12 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, SymmetricalLogLocator
 
-from src.sampling.problem import (TargetProblem, REPO_ROOT, CASES, case_tag,
-                                          experiment_dir, read_parquet_meta)
-from src.sampling.distributions import case_dist, DIST_NAMES, DIST_LABEL
+from src.cases.registry import get_case
+from src.sampling.problem import case_tag, experiment_dir, read_parquet_meta, create_problem
+from src.sampling.distributions import DIST_NAMES, DIST_LABEL
 from src.figures.style import (DEFAULT_METHODS, method_color, method_label, select_methods,
                            series_tag, add_method_args, method_selection)
-from src.figures.tail.line_exceed_strip import fmt_one_sigfig
+from src.figures.mu_distributions._panel_layout import fmt_one_sigfig
 
 KEYS = ["dist", "target", "budget", "method", "ascent_move", "rep"]
 DEFAULT_CASE = "case14_gen_per_bus"
@@ -65,14 +65,6 @@ def load_samples(case_dir, targets):
         budgets.extend(meta["budgets"])
         frames.append(pq.read_table(shard, filters=[("target", "in", targets)]).to_pandas())
     return pd.concat(frames, ignore_index=True), {**meta, "budgets": sorted(set(budgets))}
-
-
-def build_problem(case, case_dir):
-    """TargetProblem on this case's one_mu target under its own nominal Bernoulli law."""
-    tc = case_dir / "target_cache.parquet"
-    ngen = int(read_parquet_meta(tc)[1]["ngen"])
-    p = CASES[case].nominal_p()
-    return TargetProblem(tc, target="one_mu", dist=case_dist(CASES[case], "bernoulli"))
 
 
 def level_at(mu_l, w, prob):
@@ -162,20 +154,17 @@ def figure(frame, dists, specs, xorder, method_order, palette, title, xlabel):
     return fig
 
 
-def panel_specs(case, case_dir, dists, mu_l, at, fixed=None):
+def panel_specs(case, dists, mu_l, at, fixed=None):
     """Per-nominal-law (threshold c, exact truth P[|mu_l| > c]) for the panels.
 
-    Each law puts a different probability on the line, so c is distinct for each one: 
-    every panel then sits at the same target probability `at` on its own threshold.  
+    Each law puts a different probability on the line, so c is distinct for each one:
+    every panel then sits at the same target probability `at` on its own threshold.
     An explicit --threshold (fixed) pins c instead."""
-    tc = case_dir / "target_cache.parquet"
-    ngen = int(read_parquet_meta(tc)[1]["ngen"])
-    p = CASES[case].nominal_p()
     out = {}
     for dist in dists:
-        prob = TargetProblem(tc, target="one_mu", dist=case_dist(CASES[case], dist))
-        c = fixed or level_at(mu_l, prob.w, at)
-        out[dist] = (c, float(prob.w[mu_l > c].sum()))
+        prob = create_problem(case, dist, target="one_mu")
+        thr = fixed or level_at(mu_l, prob.w, at)
+        out[dist] = (thr, float(prob.w[mu_l > thr].sum()))
     return out
 
 
@@ -198,11 +187,12 @@ def target_line_strip(case=DEFAULT_CASE, dists=DIST_NAMES, targets=("one_mu",),
     and otherwise each panel resolves its own c at probability `at`.  Returns the figure,
     the per-law {dist: (c, truth)} specs, and the output path (None when save is False).
     """
-    case_dir = REPO_ROOT / "results" / case
+    c = get_case(case)
+    case, case_dir = c.name, c.results_dir
     dists, targets = list(dists), list(targets)
-    problem = build_problem(case, case_dir)
+    problem = create_problem(c, "bernoulli", target="one_mu")
     mu_l = problem.targets["one_mu"]
-    specs = panel_specs(case, case_dir, dists, mu_l, at, threshold)
+    specs = panel_specs(c, dists, mu_l, at, threshold)
 
     samples, meta = load_samples(case_dir, targets)
     budgets = [int(b) for b in budgets] if budgets else meta["budgets"]

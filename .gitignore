@@ -25,7 +25,7 @@ docs/_static
 # EGRET is fetched by uv from GitHub; no need to track locally
 Egret/
 
-
+notes/working_doc
 
 # Slurm job logs. The directory itself is tracked because Slurm opens the --output
 # file before the job script runs, so a fresh clone with no slurm/ fails to start.

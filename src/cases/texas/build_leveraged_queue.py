@@ -139,6 +139,16 @@ def draw(pool: pd.DataFrame, quota: dict, modes: list, min_screen: float,
     return pool[pool.inr.isin(chosen)]
 
 
+def keep_screened(pool: pd.DataFrame, min_screen: float) -> pd.DataFrame:
+    """Every candidate whose leverage on its target mode clears the screen -- the full pool.
+
+    The no-quota, no-draw counterpart of `draw`: the queue is as large as the leverage
+    screen allows rather than a fixed per-fuel count, for a case meant to be sampled (its
+    2^ngen space too large to enumerate) rather than swept exhaustively.
+    """
+    return pool[pool.screen_mw >= min_screen]
+
+
 def to_candidates(picks: pd.DataFrame) -> list[dict]:
     """The queue-file schema the case registry and the solve builder read."""
     keep = ["inr", "name", "fuel", "capacity_mw", "p", "county", "county_lat",
@@ -185,8 +195,16 @@ def main():
     parser.add_argument("--per-fuel", type=int, default=2)
     parser.add_argument("--topn", type=int, default=8)
     parser.add_argument("--aggregate", type=int, default=1)
+    parser.add_argument("--quota", type=int, default=None,
+                        help="candidates per fuel; default keeps FUEL_QUOTA (5 each)")
+    parser.add_argument("--full", action="store_true",
+                        help="keep every screened candidate (no quota, no draw) -- the full "
+                             "leveraged pool for a sample-only case")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
+
+    quota = FUEL_QUOTA if args.quota is None else {f: args.quota for f in FUEL_QUOTA}
+    ncand = sum(quota.values())
 
     case = CASES[args.case]
     lev, mu = load_leverage(case)
@@ -194,13 +212,17 @@ def main():
     if args.aggregate > 1:
         pool = aggregate_sites(pool, args.aggregate)
     screen = screen_matrix(pool, lev)
-    modes = target_modes(screen, pool, mu, FUEL_QUOTA, args.min_screen_mw,
+    modes = target_modes(screen, pool, mu, quota, args.min_screen_mw,
                          args.nmodes, args.per_fuel)
     pool = assign_modes(pool, screen, modes)
-    picks = draw(pool, FUEL_QUOTA, modes, args.min_screen_mw, args.topn, args.seed)
+    if args.full:
+        picks = keep_screened(pool, args.min_screen_mw)
+        tag, ncand = "levfull", len(picks)
+    else:
+        picks = draw(pool, quota, modes, args.min_screen_mw, args.topn, args.seed)
+        tag = f"lev{args.seed}" + (f"a{args.aggregate}" if args.aggregate > 1 else "")
 
-    tag = f"lev{args.seed}" + (f"a{args.aggregate}" if args.aggregate > 1 else "")
-    out = DATA / (args.out or f"activsg2000_queue20_{tag}.json")
+    out = DATA / (args.out or f"activsg2000_queue{ncand}_{tag}.json")
     out.write_text(json.dumps({"seed": args.seed, "nmodes": args.nmodes,
                                "aggregate": args.aggregate, "modes": modes,
                                "candidates": to_candidates(picks)}, indent=2))

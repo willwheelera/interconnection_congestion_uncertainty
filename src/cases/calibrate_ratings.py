@@ -86,11 +86,12 @@ def report(case):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="all", allow_all=True)
+    parser.add_argument("--case", default="queue",
+                        help="a case name, a name substring, or 'all' (defaults to 'queue', the IEEE cases)")
     parser.add_argument("--rounds", type=int, default=120)
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
-    for case in registry.resolve(args.case, family="ieee_queue"):
+    for case in registry.get_cases(args.case):
         print(f"=== {case.name} ===")
         used, peak = secure(case, args.rounds, args.workers)
         print(f"  secure after {used} rounds (all-off max mu {peak:.4g} $/MWh)")

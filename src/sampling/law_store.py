@@ -17,11 +17,22 @@ import json
 
 import numpy as np
 
+from src.paths import REPO_ROOT
 from src.sampling.mrf import MarkovRandomField
+
+DATA = REPO_ROOT / "data"
 
 
 def law_file(case, name):
-    """Where a case's named law is stored."""
+    """Where a case's named law is stored.
+
+    A `sample_only` case is sampled on the cluster, so its law is a sweep *input* the job
+    reads to draw configurations -- it lives in tracked `data/` alongside the relief set,
+    not in the regenerable (git-ignored) `results/` tree.  Enumerated cases consume their
+    laws locally after the sweep, so those stay under `results/<case>/laws/`.
+    """
+    if case.sample_only:
+        return DATA / f"{case.name}_law_{name}.json"
     return case.results_dir / "laws" / f"{name}.json"
 
 

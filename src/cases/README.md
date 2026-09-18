@@ -6,7 +6,7 @@ that the registry points at.
 
 | file | role |
 |---|---|
-| `registry.py` | The eight cases: family, model, paths, recipe, queue.  Read by every stage. |
+| `registry.py` | Every case: model, paths, recipe, queue.  Read by every stage; `--case` accepts a name, a name substring, or `all`. |
 | `build_ieee_queue.py` | Builds `case14/30/118_queue`: incumbents, candidate siting/cost/capacity/build probability, provisional ratings, N-1 contingency set. |
 | `calibrate_ratings.py` | Relaxes ratings round by round until the incumbent-only grid is N-1 secure. |
 | `build_gen_per_bus.py` | Builds the legacy DCOPF testbed `case30_gen_per_bus`. |

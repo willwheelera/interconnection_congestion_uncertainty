@@ -20,10 +20,16 @@ tagged into the output filename, so a restricted figure never overwrites the def
 """
 
 import numpy as np
+from matplotlib import colormaps
 
 COLORS = {
     "direct": "tab:red", "subset_sim": "tab:blue", "ascent_is": "tab:green",
     "smc_tilt": "tab:purple", "ascent_exact": "tab:orange", "cross_entropy": "tab:brown",
+}
+_VIRIDIS = colormaps["viridis"](np.linspace(0.1, 0.8, 4))   # dark to light, one per law
+DIST_COLOR = {                      # law -> color, shared by the per-line enumeration figures
+    "bernoulli": (_VIRIDIS[0] + np.array([.2, 0, 0, 0])), "mrf_b": _VIRIDIS[1],
+    "mrf_cobuild": _VIRIDIS[2], "mrf_substitute": _VIRIDIS[3],
 }
 LABELS = {
     "direct": "direct",
@@ -40,6 +46,12 @@ METHOD_ORDER = ["direct", "subset_sim", "smc_tilt", "cross_entropy",
                 "ascent_is", "ascent_exact"]
 DEFAULT_METHODS = ("direct", "ascent_is_b0.2")   # what every comparison figure draws
 MOVE_STYLE = {"na": "-", "all": "-", "best": ":", "top5": "--"}
+
+
+def budget_colors(budgets):
+    """One color per sampling budget along a light-to-dark ramp, kept off the gray exact fill."""
+    shades = colormaps["plasma"](np.linspace(0.1, 0.65, len(budgets)))
+    return {b: shades[k] for k, b in enumerate(budgets)}
 
 
 def parse_method(method):

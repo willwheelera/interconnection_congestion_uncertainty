@@ -45,7 +45,7 @@ one sentence if needed, why direct sampling is the method used.
 | exhaustive `2^20` duals, TX-2025 and TX-v12 (N-1 SCDCOPF) | `results/activsg2000_2025`, `results/activsg2000_original_v12` | done |
 | exhaustive duals, case14 (`2^14`) and case30 (`2^20`) DCOPF | `results/case14_gen_per_bus`, `results/case30_gen_per_bus` | done |
 | descriptor study, 4 cases x {mean, quantile, exceed} targets | `src/descriptors/` | done |
-| per-line survivor / exceedance-strip plots | `src/figures/tail/` | done |
+| per-line survivor / exceedance-strip plots | `src/figures/mu_distributions/` | done |
 | ERCOT empirical congestion study (concentration, contingency dominance) | `src/ercot/` | done, motivation only |
 | N-1 contingency screening | `src/cases/screen_contingencies.py` | done for TX and the IEEE queue cases |
 | incumbent-fleet IEEE queue testbeds (build, calibrate, screen, SCDCOPF harness, sweep) | `src/cases/`, `src/model/`, `src/sweeps/` | built; see its README |

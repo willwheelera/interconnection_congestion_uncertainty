@@ -28,8 +28,8 @@ import pyarrow as pa
 import pyarrow.dataset as pads
 import pyarrow.parquet as pq
 
-from src.cases.registry import CASES, REPO_ROOT  # noqa: F401  (CASES re-exported for callers)
-from src.sampling.mrf import default_mrf
+from src.cases.registry import CASES, REPO_ROOT, get_case  # noqa: F401  (re-exported for callers)
+from src.sampling.distributions import case_dist
 
 DATA = REPO_ROOT / "data"
 
@@ -115,14 +115,14 @@ def load_experiment_rows(case_dir, kind, row_filter):
 class Problem:
     """One enumerated congestion-dual tail case: target, nominal law, ground truth."""
 
-    def __init__(self, results_dir, dist=None):
+    def __init__(self, results_dir, *, dist):
         self.results_dir = Path(results_dir)
         df = pd.read_parquet(self.results_dir / "dual_cache.parquet")
         df.index = df.index.astype(int)
         self.ngen = int(df.index.max()).bit_length()            # all-on config is the max id
         self.nconf = 1 << self.ngen
         self._powers = (1 << np.arange(self.ngen - 1, -1, -1)).astype(np.int64)  # MSB-first
-        self.dist = dist if dist is not None else default_mrf(self.ngen)  # nominal law
+        self.dist = dist                                        # nominal law, always given
         self.S = self._build_S(df)
         self.w = self._nominal_weights()
 
@@ -203,7 +203,7 @@ class TargetProblem(Problem):
     no cached LMP) is excluded from self.available.
     """
 
-    def __init__(self, target_cache, target="max_mu", dist=None, sensitivity=None):
+    def __init__(self, target_cache, target="max_mu", *, dist, sensitivity=None):
         self.results_dir = Path(target_cache).parent
         df, self.meta = read_parquet_meta(target_cache)
         df.index = df.index.astype(int)
@@ -211,7 +211,7 @@ class TargetProblem(Problem):
         self.ngen = int(self.meta["ngen"])
         self.nconf = 1 << self.ngen
         self._powers = (1 << np.arange(self.ngen - 1, -1, -1)).astype(np.int64)  # MSB-first
-        self.dist = dist if dist is not None else default_mrf(self.ngen)
+        self.dist = dist
         self.targets = {c: self._to_full(df[c])
                         for c in df.columns if c not in DESCRIPTOR_COLUMNS}
         self.available = {c for c in self.targets if df[c].notna().any()}
@@ -247,3 +247,15 @@ class Evaluator:
         self.calls += len(ids)
         self.seen.update(ids.tolist())
         return self.S[ids]
+
+
+def create_problem(case, dist, target="max_mu"):
+    """The TargetProblem a `--case` value maps to under one nominal law.
+
+    Resolves the case through the registry, then loads its shared target_cache with the named
+    law's stored (h, J); target names the guiding column (max_mu unless asked otherwise).  The
+    single place a case name and a law name become a Problem, so every figure and analysis
+    builds the same object the sweep was scored against.  `case` may be a name or a Case.
+    """
+    c = get_case(case)
+    return TargetProblem(c.target_cache, target=target, dist=case_dist(c, dist))

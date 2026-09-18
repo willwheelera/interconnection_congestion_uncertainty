@@ -289,10 +289,11 @@ def report(name, elements, candidates, costs, loads):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="all", allow_all=True)
+    parser.add_argument("--case", default="queue",
+                        help="a case name, a name substring, or 'all' (defaults to 'queue', the IEEE cases)")
     parser.add_argument("--solver", default="gurobi")
     args = parser.parse_args()
-    for case in registry.resolve(args.case, family="ieee_queue"):
+    for case in registry.get_cases(args.case):
         build(case, args.solver)
 
 

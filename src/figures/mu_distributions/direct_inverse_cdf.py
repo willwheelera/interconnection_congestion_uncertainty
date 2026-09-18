@@ -8,8 +8,8 @@ Direct draws are target-independent, so only the nominal law (dist) and budget s
 sample.
 
 Usage:
-    uv run python -m src.figures.tail.direct_inverse_cdf --case case14_gen_per_bus
-    uv run python -m src.figures.tail.direct_inverse_cdf --case case14_gen_per_bus \
+    uv run python -m src.figures.mu_distributions.direct_inverse_cdf --case case14_gen_per_bus
+    uv run python -m src.figures.mu_distributions.direct_inverse_cdf --case case14_gen_per_bus \
         --dists bernoulli,mrf_a --budget 640 --n-reps 8
 """
 
@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-from src.sampling.problem import TargetProblem, CASES, case_tag
-from src.sampling.distributions import case_dist
-from src.figures.tail.per_line_survivor import weighted_survivor, decimate_monotone, line_order
+from src.sampling.problem import case_tag, create_problem
 from src.figures.style import COLORS
-from src.figures.tail.direct_common import load_direct_context
+from src.figures.mu_distributions._line_stats import weighted_survivor, decimate_monotone, select_lines
+from src.figures.mu_distributions._experiment_reads import direct_samples
+from src.figures.mu_distributions._panel_layout import panel_title
 
 FIG_W = 6.0                     # single figure width, fits the text block of a two-column page
 
@@ -37,7 +37,7 @@ def survivor_grid(order_names, draw_panel, legend_handles, title, xlabel, ylabel
     legend_handles  figure legend entries
     """
     ncol = min(5, len(order_names))
-    nrow = min(4, int(np.ceil(len(order_names) / ncol)))
+    nrow = min(2, int(np.ceil(len(order_names) / ncol)))
     head, foot, lft, rgt = 0.58, 0.46, 0.60, 0.08
     panel_w = (FIG_W - lft - rgt) / ncol
     figh = head + nrow * 0.95 * panel_w + foot
@@ -84,13 +84,13 @@ def panel(ax, line_idx, line_name, mu, truth_w, reps_samples, rep_ids):
         ax.plot(v, s, color=COLORS["direct"], lw=0.8, alpha=0.5, rasterized=True)
     v, s = decimate_monotone(*weighted_survivor(mu[:, line_idx], truth_w))
     ax.plot(v, s, color="k", lw=1.5, rasterized=True)
-    ax.set_title(f"line {line_name}", y=0.82, fontsize=6)
+    panel_title(ax, f"line {line_name}", y=0.80)      # curve fills the top; sit the label lower
 
 
 def plot_replicates(case, problem, mu, line_names, dist, budget, reps_samples, rep_ids,
                     case_dir):
     """One figure: the exact per-line survivor curve plus a few direct replicate curves."""
-    idx, names = line_order(mu, line_names, problem.w)
+    idx, names = select_lines(mu, line_names, problem.w)
     idx_by_name = dict(zip(names, idx))
 
     def draw(ax, name):
@@ -104,7 +104,7 @@ def plot_replicates(case, problem, mu, line_names, dist, budget, reps_samples, r
              f"budget {budget}, {len(rep_ids)} reps")
     fig, axs = survivor_grid(names, draw, handles, title, r"congestion threshold $\hat{\mu}$",
                              r"$P[\,|\mu_l| > \hat{\mu}\,]$")
-    axs[0, 0].set_ylim(1e-4, 1.5)
+    axs[0, 0].set_ylim(1e-3, 1.5)
     axs[0, 0].set_xlim(-mu.max() * 0.02, mu.max() * 1.02)
     axs[0, 0].set_yticks([10.0 ** -n for n in [1, 2, 3, 4]])
 
@@ -116,10 +116,11 @@ def plot_replicates(case, problem, mu, line_names, dist, budget, reps_samples, r
 
 def run(case, dists, budget=640, n_reps=8):
     """One direct-vs-exact figure per nominal law; returns them in the given order."""
-    case_dir, samples, meta, tc, ngen, p = load_direct_context(case)
+    c, samples, meta = direct_samples(case)
+    case, case_dir = c.name, c.results_dir
     figs = []
     for dist in dists:
-        problem = TargetProblem(tc, dist=case_dist(CASES[case], dist))
+        problem = create_problem(c, dist)
         mu, line_names = problem.mu_table()
         reps_samples = direct_rep_samples(samples, dist, budget)
         rep_ids = [r for r in replicate_indices(meta["n_rep"], n_reps) if r in reps_samples]
@@ -130,7 +131,7 @@ def run(case, dists, budget=640, n_reps=8):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="case14_gen_per_bus")
+    parser.add_argument("--case", default="lev3a3")
     parser.add_argument("--dists", default="bernoulli")
     parser.add_argument("--budget", type=int, default=640)
     parser.add_argument("--n-reps", type=int, default=8)

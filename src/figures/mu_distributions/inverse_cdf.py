@@ -11,42 +11,22 @@ By default this draws `direct` and ascent-IS at beta 0.2; every other sampler is
 frame and comes back with --methods (see figures.style).
 
 Usage:
-    uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus
-    uv run python -m src.figures.tail.inverse_cdf --case case14_gen_per_bus \
-        --dist mrf_b --target sum_mu --budget 640
-    uv run python -m src.figures.tail.inverse_cdf --case activsg2000_original_v12 \
+    uv run python -m src.figures.mu_distributions.inverse_cdf --case case14_gen_per_bus
+    uv run python -m src.figures.mu_distributions.inverse_cdf --case case14_gen_per_bus \
+        --dist mrf_a --target sum_mu --budget 640
+    uv run python -m src.figures.mu_distributions.inverse_cdf --case activsg2000_original_v12 \
         --methods direct,ascent_is
 """
 
 import argparse
 
-import numpy as np
 import matplotlib.pyplot as plt
 
-from src.sampling.problem import REPO_ROOT, load_experiment, case_tag
-from src.figures.style import (MOVE_STYLE, band, method_color, series_label, select_methods,
+from src.cases.registry import get_case
+from src.sampling.problem import load_experiment, case_tag
+from src.figures.style import (MOVE_STYLE, band, method_color, series_label,
                            series_tag, add_method_args, method_selection)
-
-
-def select_series(series, methods):
-    """Keep only the series whose method is in the requested selection."""
-    keep = set(select_methods({m for m, _ in series}, methods))
-    return {key: est for key, est in series.items() if key[0] in keep}
-
-
-def load_slice(case_dir, sel):
-    """Return (thresholds, truth, {(method, move): (n_rep, n_thr)}, meta) for one slice."""
-    df, meta = load_experiment(case_dir, "curves")
-    for key, val in sel.items():
-        df = df[df[key] == val]
-    thresholds = np.sort(df["threshold"].unique())
-    truth = (df[df.method == "truth"].set_index("threshold")["estimate"]
-             .reindex(thresholds).to_numpy())
-    series = {}
-    for (m, mv), g in df[df.method != "truth"].groupby(["method", "ascent_move"]):
-        series[(m, mv)] = (g.pivot(index="rep", columns="threshold", values="estimate")
-                           .reindex(columns=thresholds).to_numpy())
-    return thresholds, truth, series, meta
+from src.figures.mu_distributions._experiment_reads import load_slice, select_series
 
 
 def main():
@@ -60,7 +40,8 @@ def main():
     args = parser.parse_args()
     methods = method_selection(args)
 
-    case_dir = REPO_ROOT / "results" / args.case
+    c = get_case(args.case)
+    case_dir = c.results_dir
     budget = args.budget or load_experiment(case_dir, "curves")[1]["budgets"][0]
     sel = dict(dist=args.dist, target=args.target, snapshot=args.snapshot, budget=budget)
     b, truth, series, meta = load_slice(case_dir, sel)
@@ -76,13 +57,13 @@ def main():
     ax.set_ylim(max(1e-7, truth[truth > 0].min() * 0.5), 1.5)
     ax.set_xlabel(rf"threshold $b$ on {args.target}")
     ax.set_ylabel(r"exceedance probability $P[\,\mathrm{target} \geq b\,]$")
-    ax.set_title(f"{args.case}: {args.dist}, {args.target}/{args.snapshot}, "
+    ax.set_title(f"{c.name}: {args.dist}, {args.target}/{args.snapshot}, "
                  f"budget {budget}, {meta['n_rep']} reps")
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     out = (case_dir / f"inverse_cdf_{args.dist}_{args.target}_{args.snapshot}_b{budget}"
-                      f"{series_tag(methods)}_{case_tag(args.case)}.pdf")
+                      f"{series_tag(methods)}_{case_tag(c.name)}.pdf")
     fig.savefig(out)
     print(f"saved -> {out}")
     plt.show()

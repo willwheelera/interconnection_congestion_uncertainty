@@ -174,7 +174,7 @@ def sweep(case, target, bits, out_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     parser.add_argument("--mode", default="full", choices=["full", "random", "leq_k"])
     parser.add_argument("--n", type=int, default=20000, help="draws for --mode random")
     parser.add_argument("--k", type=int, default=5, help="max candidates on for --mode leq_k")

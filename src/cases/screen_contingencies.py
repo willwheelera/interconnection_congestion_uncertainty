@@ -160,12 +160,12 @@ def screen(case, n_stress, workers, seed):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, allow_all=True)
+    parser.add_argument("--case", required=True, help="a case name, a name substring, or 'all'")
     parser.add_argument("--n-stress", type=int, default=32)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
-    for case in registry.resolve(args.case):
+    for case in registry.get_cases(args.case):
         if case.model != "scdcopf":
             continue
         screen(case, args.n_stress, args.workers, args.seed)

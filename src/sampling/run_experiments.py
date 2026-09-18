@@ -19,6 +19,12 @@ with no queue has no technology groups, so its structured laws are skipped.  Swe
 subset of the laws, or of the ascent-IS defensive weights, rewrites only those rows in each
 budget shard, so a sweep can be extended without redoing the rest.
 
+A substring or `all` selection tolerates members that have not been built yet: a case with no
+target_cache is skipped with a notice rather than aborting the batch (a single named case
+still errors, since it was asked for by name).  `--skip-existing` additionally skips any case
+that already carries a shard for every requested budget, so an interrupted sweep resumes
+without recomputing the cases that finished.
+
 Ascent-IS is run at the defensive weights `--betas`, each written as its own method
 (`ascent_is_b0.5`), so the betas are separate series in every downstream frame and figure.
 The default is the single weight the figures draw; passing more compares them at the cost
@@ -32,6 +38,7 @@ Usage:
         --dists mrf_cobuild,mrf_substitute --budgets 640,2560,10240
     uv run python -m src.sampling.run_experiments --case activsg2000_original_v12 \
         --betas 0.2,0.5,0.8
+    uv run python -m src.sampling.run_experiments --case lev --skip-existing
 """
 
 import argparse
@@ -47,16 +54,16 @@ import src.sampling.methods.ascent_exact_mass as exact
 import src.sampling.methods.cross_entropy as ce
 from src.cases import registry
 from src.sampling.problem import TargetProblem, write_experiment_shard, experiment_dir
-from src.sampling.distributions import COUPLED_NAMES, DIST_NAMES, case_dist
+from src.sampling.distributions import DIST_NAMES, case_dist, case_law_names
 
 PROBS = np.array([1e-2, 1e-3, 1e-4])                     # fixed tail points reported per cell
 BETAS = [0.2]               # ascent-IS defensive weights, each run as its own method
 
 
-def direct(problem, ev, rng, budget):
+def direct(problem, evaluator, rng, budget):
     """Baseline sampler: budget iid nominal draws, each weighted 1/budget."""
     ids = problem.bits_to_id(problem.draw_nominal(budget, rng))
-    ev(ids)
+    evaluator(ids)
     return ids, np.full(len(ids), 1.0 / len(ids))
 
 
@@ -89,15 +96,6 @@ def build_samplers(dist_name, proxy, betas=BETAS):
     if dist_name == "bernoulli":
         samplers[("cross_entropy", "na")] = ce.sample
     return samplers
-
-
-def case_laws(case, names):
-    """The requested nominal laws a case actually has, in the order given.
-
-    The structured laws couple within technology groups, so they exist only for the cases
-    with a queue to read fuels from (the same rule build_laws.py stores them under)."""
-    groups = case.candidate_groups()
-    return [n for n in names if groups is not None or n not in COUPLED_NAMES]
 
 
 def target_specs(problem):
@@ -149,14 +147,13 @@ def run_case(case, proxy_kind, n_rep, budgets, dists, betas=BETAS, seed0=0):
     read."""
     from src.sensitivity.proxy import make_proxy   # defers egret/pyomo to run time
     name, tc, ngen = case.name, case.target_cache, case.ngen
-    p = case.nominal_p()
     base = TargetProblem(tc, "max_mu", dist=case_dist(case, "bernoulli"))
     specs = target_specs(base)
     proxy = make_proxy(proxy_kind if case.proxy else None, name, ngen)
 
     curves = {b: [] for b in budgets}
     samples = {b: [] for b in budgets}
-    for dist_name in case_laws(case, dists):
+    for dist_name in case_law_names(case, dists):
         dist = case_dist(case, dist_name)
         samplers = build_samplers(dist_name, proxy, betas)
         for snapshot, label, col in specs:
@@ -184,19 +181,41 @@ def run_case(case, proxy_kind, n_rep, budgets, dists, betas=BETAS, seed0=0):
           f"and {experiment_dir(case_dir, 'samples')}/\n")
 
 
+def has_all_shards(case, budgets):
+    """True if the case already carries a curves shard for every requested budget.
+
+    run_case writes a case's shards only after all its cells finish, so a case is either
+    fully present for a budget or absent; the presence of every budget's file is enough
+    to call it done and skip it under --skip-existing.
+    """
+    d = experiment_dir(case.results_dir, "curves")
+    return all((d / f"b{b}.parquet").exists() for b in budgets)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser, default="case14_gen_per_bus", allow_all=True)
+    parser.add_argument("--case", default="activsg2000_v12_lev3a3",
+                        help="a case name, a name substring, or 'all'")
     parser.add_argument("--proxy", default="cached", choices=["cached", "live"])
     parser.add_argument("--n-rep", type=int, default=40)
-    parser.add_argument("--budgets", default="640,2560")
-    parser.add_argument("--dists", default=",".join(DIST_NAMES + COUPLED_NAMES))
+    parser.add_argument("--budgets", default="640,2560,10240")
+    parser.add_argument("--dists", default=",".join(DIST_NAMES))
     parser.add_argument("--betas", default=",".join(f"{b:g}" for b in BETAS))
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="skip cases that already have a shard for every requested budget")
     args = parser.parse_args()
     budgets = [int(b) for b in args.budgets.split(",")]
     dists = args.dists.split(",")
     betas = [float(b) for b in args.betas.split(",")]
-    for case in registry.resolve(args.case):
+
+    batch = args.case not in registry.CASES     # a substring or 'all' tolerates un-built members
+    for case in registry.get_cases(args.case):
+        if batch and not case.target_cache.exists():
+            print(f"=== {case.name}: no target_cache, skipping (build_target_cache first) ===")
+            continue
+        if args.skip_existing and has_all_shards(case, budgets):
+            print(f"=== {case.name}: shards present for {budgets}, skipping (--skip-existing) ===")
+            continue
         print(f"=== {case.name} (proxy={args.proxy}) ===")
         run_case(case, args.proxy, args.n_rep, budgets, dists, betas)
 

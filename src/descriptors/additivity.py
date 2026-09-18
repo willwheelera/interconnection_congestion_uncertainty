@@ -53,7 +53,7 @@ import numpy as np
 import pandas as pd
 
 from src.cases.registry import CASES
-from src.sampling.distributions import nominal_law
+from src.sampling.distributions import case_dist
 from src.sampling.problem import read_parquet_meta
 
 # case name, short label for the figures
@@ -106,7 +106,7 @@ def r2(y, pred, w=None):
 
 def nominal_weights(case, ids, ngen):
     """Nominal probability of each enumerated id under the case's independent law."""
-    logw = nominal_law(case).log_weight(config_bits(ids, ngen))
+    logw = case_dist(case, "bernoulli").log_weight(config_bits(ids, ngen))
     w = np.exp(logw - logw.max())
     return w / w.sum()
 

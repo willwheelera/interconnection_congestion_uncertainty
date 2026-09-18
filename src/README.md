@@ -25,10 +25,11 @@ empirical study of real ERCOT congestion, which motivates the modeling recipe), 
 
 ## The case registry
 
-`cases/registry.py` is the single source of truth for what a case is: its family, its
-physical model, where every input and cache lives, and the modeling recipe it is solved
-under.  **Every entry point takes `--case <name>`** and reads the rest from the record, so
-no script hardcodes a filename and no case needs custom code in a downstream stage.
+`cases/registry.py` is the single source of truth for what a case is: its physical model,
+where every input and cache lives, and the modeling recipe it is solved under.  **Every
+entry point takes `--case <name>`** (a case name, a substring of one, or `all`) and reads
+the rest from the record, so no script hardcodes a filename and no case needs custom code
+in a downstream stage.
 
 ```python
 from src.cases import registry
@@ -78,7 +79,7 @@ uv run python -m src.sweeps.build_dual_cache   --case case30_queue
 
 # 5. estimate, describe, draw
 uv run python -m src.sampling.run_experiments  --case case30_queue
-uv run python -m src.figures.tail.per_line_survivor --case case30_queue
+uv run python -m src.figures.mu_distributions.per_line_survivor --case case30_queue
 uv run python -m src.figures.descriptors
 ```
 

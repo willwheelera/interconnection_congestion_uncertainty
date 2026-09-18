@@ -18,7 +18,9 @@ Usage:
 
 import numpy as np
 
-from src.sampling.problem import Problem, REPO_ROOT
+from src.cases.registry import get as get_case
+from src.sampling.distributions import case_dist
+from src.sampling.problem import Problem
 
 
 def n_per_level_for_budget(budget, p0=0.1, n_levels=6):
@@ -162,7 +164,8 @@ def report(name, est, truth, idx):
 
 
 def main():
-    problem = Problem(REPO_ROOT / "results" / "case14_gen_per_bus")
+    case = get_case("case14_gen_per_bus")
+    problem = Problem(case.results_dir, dist=case_dist(case, "bernoulli"))
     grid_probs = np.logspace(-1, -6, 40)                 # dense tail grid for the curve
     thresholds = problem.thresholds_for_probs(grid_probs)
     truth = problem.true_exceedance(thresholds)

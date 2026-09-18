@@ -85,6 +85,8 @@ EGRET (`.venv/lib/python3.14/site-packages/egret/`) provides:
 
 ## Language and phrases
 
+Use plain language. Use clear and accurate words rather than informal, evocative words. Avoid metaphors.
+
 These words and phrases are overused and should be avoided:
 - caveat
 - say the word
@@ -94,6 +96,7 @@ These words and phrases are overused and should be avoided:
 - things worth flagging
 - flag
 - gotcha
+- bites
 
 Confusing words to avoid:
 - adder

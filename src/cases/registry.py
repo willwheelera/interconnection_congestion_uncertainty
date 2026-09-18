@@ -1,27 +1,29 @@
 """The single registry of testbed cases -- every stage reads its case facts from here.
 
-One `Case` record holds everything that distinguishes one testbed from another: which
-family it belongs to, its physical model, where its inputs and caches live, and the
-modeling recipe it is solved under.  Every entry point takes `--case <name>` (see
-`add_case_arg`), looks the record up with `get`, and reads paths off it, so no script
-hardcodes a filename and no case needs custom code in a downstream stage.
+One `Case` record holds everything that distinguishes one testbed from another: its
+physical model, where its inputs and caches live, and the modeling recipe it is solved
+under.  Every entry point declares its own `--case` flag and expands the value with
+`get_cases` (a case name, a substring of one, or `all`) or `get` (one exact case); each
+reads paths off the record, so no script hardcodes a filename and no case needs custom
+code in a downstream stage.
 
-Three families, differing only in how the case is constructed and evaluated:
+Three kinds of testbed, differing only in how the case is constructed and evaluated;
+each kind shares a name stem, so a `--case` substring selects the whole kind:
 
-  gen_per_bus  the legacy DCOPF testbeds (a generator at every load bus, no incumbent
-               fleet).  Enumerated as one solution file per config, reduced to a wide
-               dual_cache.
-  texas        ACTIVSg2000 under an N-1 SCDCOPF, evaluated over a collection of ERCOT
-               load snapshots (so its sweeps parallelize over snapshots and average mu).
-  ieee_queue   IEEE 14/30/118 with the original fleet as incumbents and a queue on top,
-               same SCDCOPF recipe as texas but a single load level (so its sweeps
-               parallelize over configurations).
+  *_gen_per_bus  the legacy DCOPF testbeds (a generator at every load bus, no incumbent
+                 fleet).  Enumerated as one solution file per config, reduced to a wide
+                 dual_cache.
+  activsg2000_*  ACTIVSg2000 under an N-1 SCDCOPF, evaluated over a collection of ERCOT
+                 load snapshots (so its sweeps parallelize over snapshots and average mu);
+                 the `*_v12_lev*` entries are leveraged-queue variants of one of these.
+  case*_queue    IEEE 14/30/118 with the original fleet as incumbents and a queue on top,
+                 same SCDCOPF recipe as ACTIVSg2000 but a single load level (so its
+                 sweeps parallelize over configurations).
 
 Paths follow the `data/<case>*.json` and `results/<case>/` convention and are derived
 from the case name; `paths` overrides an entry for the cases whose files predate it.
 """
 
-import argparse
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,10 +67,9 @@ SCDCOPF_RECIPE = Recipe()
 
 @dataclass(frozen=True)
 class Case:
-    """One testbed: its family, physical model, cache layout, and modeling recipe."""
+    """One testbed: its physical model, cache layout, and modeling recipe."""
 
     name: str
-    family: str                 # "gen_per_bus" | "texas" | "ieee_queue"
     model: str                  # "dcopf" | "scdcopf"
     ngen: int                   # queue candidates == configuration bits
     ingest: str                 # "wide" | "long" -- how the sweep output is reduced
@@ -77,6 +78,7 @@ class Case:
     recipe: Recipe | None = SCDCOPF_RECIPE   # None for the plain-DCOPF cases
     p_default: float | None = None           # build probability when there is no queue file
     proxy: bool = False                      # a sensitivity_cache exists for ascent moves
+    sample_only: bool = False                # too large to enumerate: MCMC-sampled, no cache
     build: dict | None = None                # construction knobs, used only by cases.ieee
     paths: dict = field(default_factory=dict)   # overrides for pre-convention layouts
 
@@ -257,27 +259,33 @@ _TX_SNAPSHOTS = DATA / "activsg2000_load_collection.json"
 
 
 def _texas(name, one_mu, case_file, **paths) -> Case:
-    return Case(name=name, family="texas", model="scdcopf", ngen=20,
+    return Case(name=name, model="scdcopf", ngen=20,
                 ingest="long", parallel="snapshot", one_mu=one_mu,
                 paths={"case": case_file, "candidates": _TX_QUEUE,
                        "snapshots": _TX_SNAPSHOTS, **paths})
 
 
-def _leveraged(tag) -> Case:
+def _leveraged(tag, ngen=20, queue=None, sample_only=False) -> Case:
     """One activsg2000_original_v12 variant differing only in which queue sits on top.
 
     Same network, fleet, and snapshots as v12, so the sweeps compare directly.  The
     relief set and the screened contingency set are *not* inherited from v12: both
     depend on which buses the queue sits at, so each variant selects and screens its
     own.  `one_mu` is unset because the most congested element is not known until the
-    case is swept.
+    case is swept.  `ngen`/`queue` default to the 20-candidate draw; a larger draw (the
+    q28 variant) passes both explicitly.  `sample_only` marks the full-queue variant,
+    whose 2^ngen space is too large to enumerate and is estimated by MCMC instead.
     """
-    return _texas(f"activsg2000_v12_{tag}", None, DATA / "activsg2000.json",
-                  candidates=DATA / f"activsg2000_queue20_{tag}.json")
+    name = f"activsg2000_v12_{tag}"
+    candidates = DATA / (queue or f"activsg2000_queue20_{tag}.json")
+    return Case(name=name, model="scdcopf", ngen=ngen,
+                ingest="long", parallel="snapshot", one_mu=None, sample_only=sample_only,
+                paths={"case": DATA / "activsg2000.json", "candidates": candidates,
+                       "snapshots": _TX_SNAPSHOTS})
 
 
 def _ieee(name, network, ngen, one_mu) -> Case:
-    return Case(name=name, family="ieee_queue", model="scdcopf", ngen=ngen,
+    return Case(name=name, model="scdcopf", ngen=ngen,
                 ingest="long", parallel="config", one_mu=one_mu,
                 build=dict(network=network, ncand=ngen, base_margin=1.05))
 
@@ -289,11 +297,11 @@ CASES: dict[str, Case] = {
     # interesting single-element target (P[mu > 100] ~ 5%); its most-congested line is
     # far rarer.
     "case14_gen_per_bus": Case(
-        name="case14_gen_per_bus", family="gen_per_bus", model="dcopf", ngen=14,
+        name="case14_gen_per_bus", model="dcopf", ngen=14,
         ingest="wide", parallel="config", one_mu="6", recipe=None,
         p_default=0.65, proxy=True),
     "case30_gen_per_bus": Case(
-        name="case30_gen_per_bus", family="gen_per_bus", model="dcopf", ngen=20,
+        name="case30_gen_per_bus", model="dcopf", ngen=20,
         ingest="wide", parallel="config", one_mu="27", recipe=None,
         p_default=0.65, proxy=True),
 
@@ -317,6 +325,20 @@ CASES: dict[str, Case] = {
     **{f"activsg2000_v12_{tag}": _leveraged(tag)
        for i in range(5) for tag in (f"lev{i}", f"lev{i}a3")},
 
+    # A larger aggregated leveraged draw: seven candidates per fuel instead of five, so
+    # 28 configuration bits (2^28 configurations) rather than 20.  Same v12 network,
+    # fleet, snapshots, and construction as lev0a3 -- only the per-fuel quota changed.
+    "activsg2000_v12_q28_lev0a3": _leveraged(
+        "q28_lev0a3", ngen=28, queue="activsg2000_queue28_lev0a3.json"),
+
+    # The full leveraged pool: every candidate that clears the shift-factor screen, no
+    # per-fuel quota and no aggregation (195 candidates, blocks Wind 25 / Solar 51 /
+    # Battery 95 / Gas 24).  2^195 is unenumerable, so this case is sampled by MCMC under
+    # a coupled MRF nominal law (sampling.mcmc_sweep), never swept -- sample_only guards
+    # the 1<<ngen enumeration paths against it.
+    "activsg2000_v12_levfull": _leveraged(
+        "levfull", ngen=195, queue="activsg2000_queue_levfull.json", sample_only=True),
+
     # Incumbent-fleet IEEE queue testbeds: the network's own generators stay online and
     # a queue is added on top, under the same recipe as Texas so the five cases are
     # comparable.  case118's one_mu is unset -- its scalar max_mu is nearly degenerate,
@@ -329,19 +351,47 @@ CASES: dict[str, Case] = {
 
 
 def get(name: str) -> Case:
-    """The registered case of that name."""
+    """The one registered case with this exact name (single-case entry points)."""
     return CASES[name]
 
 
-def add_case_arg(parser: argparse.ArgumentParser, default=None, allow_all=False) -> None:
-    """Add the shared `--case` argument every entry point takes."""
-    choices = list(CASES) + (["all"] if allow_all else [])
-    parser.add_argument("--case", default=default, choices=choices, required=default is None,
-                        help="registered case name")
+def get_cases(value: str) -> list[Case]:
+    """The cases a `--case` value names: one case, a name substring, or every case.
+
+    An exact registered case name selects just that case, so a name that happens to be a
+    substring of a longer name still selects only itself.  "all" selects every case.  Any
+    other string selects every case whose name contains it, which is how the naming
+    convention doubles as the grouping: `lev` selects the leveraged variants, `a3` the
+    aggregated ones, `queue` the IEEE cases, `activsg2000` every Texas case.  A value
+    matching no name raises.  This is the only place a `--case` value is interpreted, so a
+    reader consults just this function to know everything the flag accepts.
+    """
+    if value == "all":
+        return list(CASES.values())
+    if value in CASES:
+        return [CASES[value]]
+    matches = [c for c in CASES.values() if value in c.name]
+    if matches:
+        return matches
+    raise ValueError(f"unknown --case {value!r}: expected 'all', a case name, or a "
+                     f"substring of one; names are {sorted(CASES)}")
 
 
-def resolve(name: str, family: str | None = None) -> list[Case]:
-    """Cases named by `--case`, where "all" means every case (of `family`, if given)."""
-    if name != "all":
-        return [get(name)]
-    return [c for c in CASES.values() if family is None or c.family == family]
+def get_case(value) -> Case:
+    """The single registered case a `--case` value names (exact name or unique substring).
+
+    The one-case partner of `get_cases`, for the entry points -- most solves, every per-case
+    figure -- that act on exactly one case: it interprets the value the same way but requires
+    the match to be unique, so an ambiguous substring is an error rather than a silent pick.
+    An already-resolved Case passes through unchanged, so a caller may hold either.
+    """
+    if isinstance(value, Case):
+        return value
+    matches = get_cases(value)
+    if len(matches) != 1:
+        raise ValueError(f"--case {value!r} names {[c.name for c in matches]}; name one case")
+    return matches[0]
+
+if __name__ == "__main__":
+    for k in CASES:
+        print(k)

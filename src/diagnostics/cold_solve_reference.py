@@ -75,7 +75,7 @@ def summarize(label, avg_mu):
 
 def main():
     parser = argparse.ArgumentParser()
-    registry.add_case_arg(parser)
+    parser.add_argument("--case", required=True, help="a registered case name")
     parser.add_argument("--config", type=int, nargs="+")
     parser.add_argument("--solver", default="gurobi")
     args = parser.parse_args()

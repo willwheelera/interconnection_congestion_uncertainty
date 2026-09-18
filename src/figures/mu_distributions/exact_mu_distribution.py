@@ -15,8 +15,8 @@ binned mass are never read off the same mark.  Everything here is exact: the cas
 enumerated, so every config's nominal weight is known.
 
 Usage:
-    uv run python -m src.figures.tail.exact_mu_distribution --case case30_gen_per_bus
-    uv run python -m src.figures.tail.exact_mu_distribution --case case30_gen_per_bus \
+    uv run python -m src.figures.mu_distributions.exact_mu_distribution --case case30_gen_per_bus
+    uv run python -m src.figures.mu_distributions.exact_mu_distribution --case case30_gen_per_bus \
         --dists bernoulli --n-lines 10 --bins 60
 """
 
@@ -26,21 +26,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.ticker import MultipleLocator
 
-from src.sampling.problem import TargetProblem, REPO_ROOT, CASES, case_tag
-from src.sampling.distributions import case_dist, DIST_LABEL
-from src.figures.tail.direct_common import panel_grid
+from src.cases.registry import get_case
+from src.sampling.problem import case_tag, create_problem
+from src.sampling.distributions import DIST_LABEL
 from src.figures.style import COLORS
-from src.figures.tail.per_line_survivor import line_order
+from src.figures.mu_distributions._line_stats import select_lines
+from src.figures.mu_distributions._panel_layout import panel_grid
 
 ZERO_COLOR = "0.45"        # gray, so the point mass never reads as a histogram bar
-
-
-def load_problem(case, dist):
-    """(case_dir, problem) for one case and nominal law; no experiment samples needed."""
-    case_dir = REPO_ROOT / "results" / case
-    return case_dir, TargetProblem(case_dir / "target_cache.parquet",
-                                   dist=case_dist(CASES[case], dist))
 
 
 def moments(v, w):
@@ -57,7 +52,7 @@ def congested_histogram(v, w, floor, bins):
     return edges, mass
 
 
-def dist_panel(ax, v, w, name, floor, bins, ymin):
+def dist_panel(ax, v, w, floor, bins, ymin):
     """One line's panel: binned congested mass, the zero point mass, mean and +-1 sd."""
     edges, mass = congested_histogram(v, w, floor, bins)
     mean, sd = moments(v, w)
@@ -69,8 +64,7 @@ def dist_panel(ax, v, w, name, floor, bins, ymin):
     ax.axvline(mean, color="k", lw=1.0, zorder=4)
 
     ax.set_xlim(-0.05 * edges[-1], 1.05 * edges[-1])
-    ax.set_title(f"line {name}", fontsize=6, pad=1.5)
-    ax.text(0.96, 0.94, f"mean {mean:.3g}\nsd {sd:.3g}\nP[0] {p0:.3g}",
+    ax.text(0.96, 0.80, f"mean {mean:.3g}\nsd {sd:.3g}\nP[0] {p0:.3g}",   # below the shared title
             transform=ax.transAxes, ha="right", va="top", fontsize=5, zorder=5,
             bbox=dict(fc="white", ec="none", alpha=0.7, pad=1.0))
 
@@ -85,42 +79,47 @@ def dist_legend():
 
 
 def plot_distribution(case, problem, mu, line_names, dist, floor, bins, n_lines, ymin, case_dir):
-    """One figure: the exact |mu_l| distribution, one panel per congested line."""
-    idx, names = line_order(mu, line_names, problem.w)
-    congested = [(i, n) for i, n in zip(idx, names) if (mu[:, i] > floor).any()]
-    shown = congested[:n_lines]
-    print(f"{dist}: {len(congested)} congested lines, showing {len(shown)}")
+    """One figure: the exact |mu_l| distribution, one panel per shown line."""
+    idx, names = select_lines(mu, line_names, problem.w, n=n_lines)
+    shown = list(zip(idx, names))
+    print(f"{dist}: showing {len(shown)} lines")
     column = {n: i for i, n in shown}
 
     def draw(ax, name):
-        dist_panel(ax, mu[:, column[name]], problem.w, name, floor, bins, ymin)
+        dist_panel(ax, mu[:, column[name]], problem.w, floor, bins, ymin)
 
     title = (f"{case}: exact distribution of the congestion dual  |  "
              f"{DIST_LABEL[dist]}, full enumeration")
     fig, axs = panel_grid([n for _, n in shown], draw, dist_legend(), title,
-                          r"$|\mu_l|$", "probability", log_y=False, sharex=False)
-    axs[0, 0].set_ylim(ymin, 1.6)
+                          r"$|\mu_l|$", "probability", log_y=False, sharex=False, sharey=True,
+                          label=lambda n: f"line {n}")
+    axs[0, 0].set_ylim(ymin, 1.05)
+    for ax in axs.ravel()[:len(shown)]:               # labeled 0/0.5/1, minor mark each tenth
+        ax.yaxis.set_major_locator(MultipleLocator(0.5))
+        ax.yaxis.set_minor_locator(MultipleLocator(0.1))
     out = case_dir / f"exact_mu_distribution_{dist}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
     return fig
 
 
-def run(case, dists, bins=40, n_lines=20, ymin=1e-7, mu_floor=1e-2):
+def run(case, dists, bins=20, n_lines=5, ymin=1e-7, mu_floor=1e-2):
     """One exact-distribution figure per nominal law; returns them in the given order."""
+    c = get_case(case)
+    case = c.name
     figs = []
     for dist in dists:
-        case_dir, problem = load_problem(case, dist)
+        problem = create_problem(c, dist)
         mu, line_names = problem.mu_table()
         figs.append(plot_distribution(case, problem, mu, line_names, dist, mu_floor,
-                                      bins, n_lines, ymin, case_dir))
+                                      bins, n_lines, ymin, c.results_dir))
     return figs
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", default="activsg2000_original_v12")
-    parser.add_argument("--dists", default="bernoulli,mrf_cobuild,mrf_substitute")#"bernoulli,mrf_a,mrf_b,mrf_c")
+    parser.add_argument("--case", default="activsg2000_v12_lev3a3")
+    parser.add_argument("--dists", default="bernoulli,mrf_cobuild,mrf_substitute")
     parser.add_argument("--bins", type=int, default=40)
     parser.add_argument("--n-lines", type=int, default=15)
     parser.add_argument("--ymin", type=float, default=1e-7)
@@ -133,4 +132,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    dists = "bernoulli,mrf_cobuild,mrf_substitute"
+    for i in range(4):
+        case = f"activsg2000_v12_lev{i}a3"
+        run(case, ["bernoulli","mrf_b"])#dists.split(","))
+    plt.show()
