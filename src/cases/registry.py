@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.cases.candidate_clustering import compact_groups
 from src.model.relief import ALL_LOAD_BUSES
 from src.paths import REPO_ROOT
 
@@ -209,20 +210,28 @@ class Case:
                         "cost": float(c["cost"]) if "cost" in c else FUEL_COST[fuel],
                         "p": float(c["p"]),
                         "fuel": fuel,
+                        "lat": c.get("county_lat"),
+                        "lng": c.get("county_lng"),
                         "name": c.get("name")})
         return out
 
     def candidate_groups(self) -> list[list[int]] | None:
-        """Candidate indices grouped by fuel -- the blocks the coupled laws couple within.
+        """Candidate indices in the blocks the coupled laws couple within.
 
-        None when the case has no queue, which `make_dist` reads as a single block.
+        Geographically compact groups of about five within each fuel
+        (`candidate_clustering.compact_groups`) when the queue carries county coordinates, so
+        a large fuel is not one strong block; one block per fuel otherwise.  None when the
+        case has no queue, which `make_dist` reads as a single block.
         """
         if self.candidates_file is None:
             return None
-        groups: dict = {}
-        for i, c in enumerate(self.candidates()):
-            groups.setdefault(c["fuel"], []).append(i)
-        return list(groups.values())
+        cands = self.candidates()
+        if any(c["lat"] is None for c in cands):
+            groups: dict = {}
+            for i, c in enumerate(cands):
+                groups.setdefault(c["fuel"], []).append(i)
+            return list(groups.values())
+        return compact_groups(cands)
 
     def build_p(self) -> np.ndarray:
         """Per-candidate build probability as a length-ngen vector, for drawing configs."""
