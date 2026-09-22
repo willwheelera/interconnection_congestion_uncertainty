@@ -140,36 +140,6 @@ def gibbs_sample(h, J, n_chains=8000, warmup=300, seed=1):
     return X
 
 
-def calibrate_field_mcmc(J, p, n_chains=4000, warmup=200, iters=400, lr0=0.6,
-                         tol=2e-3, seed=0, clip=1e-4):
-    """The field h whose Gibbs marginals under coupling J match p, without enumeration.
-
-    Robbins-Monro moment matching on persistent chains: each iteration takes one Gibbs
-    sweep, estimates the marginals from the chain ensemble, and steps h in logit space
-    toward the target (the step is exact in one iteration when J = 0).  This is the
-    enumeration-free replacement for `calibrate_field`, so a law can be built at an ngen
-    of hundreds where all_configs is impossible.  Returns (h, realized_marginals).
-    """
-    def logit(q):
-        q = np.clip(q, clip, 1 - clip)
-        return np.log(q / (1 - q))
-
-    rng = np.random.default_rng(seed)
-    target = logit(p)
-    h = target.copy()
-    X = (rng.random((n_chains, len(p))) < p).astype(np.int8)
-    for _ in range(warmup):
-        gibbs_sweep(h, J, X, rng)
-    m = X.mean(axis=0)
-    for t in range(iters):
-        gibbs_sweep(h, J, X, rng)
-        m = X.mean(axis=0)
-        if np.abs(m - p).max() < tol:
-            break
-        h += (lr0 / (1 + t / 50)) * (target - logit(m))
-    return h, m
-
-
 def default_mrf(ngen, p_on=0.75, coupling=0.08, coupling_std=0.1, seed=0):
     """A fixed pairwise MRF tuned to spread the congestion target S over a graded tail.
 

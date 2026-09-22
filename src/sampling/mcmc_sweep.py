@@ -4,16 +4,20 @@ The enumerated cases solve every one of their 2^ngen configurations and score sa
 against that exact truth (`sweeps.enumerate_configs`, `sampling.run_experiments`).  The full
 leveraged queue (ngen ~ 195) has no such reference: 2^195 cannot be enumerated, so its
 congestion-dual distribution is *estimated* by drawing configurations from the nominal law
-and solving each one.  The nominal law is a coupled MRF, so the draws come from **MCMC**
-(Gibbs, `mrf.gibbs_sweep`) rather than iid sampling -- the whole reason this is a separate
-pipeline.
+and solving each one -- the whole reason this is a separate pipeline.
 
-An ensemble of `B` Gibbs chains is advanced `--thin` sweeps between solves; their current
-states are one batch of `B` configurations, solved through the same worker pool and the same
-screened-contingency augmentation the enumeration uses (`evaluator.for_case`,
-`enumerate_configs.solve_chunk`), so each recorded solve is exact for the full N-1 problem.
-Configurations are keyed by their **bit vector** (packed), not the MSB-first int64 id every
-other cache uses -- that id overflows past ngen 63.
+How a batch of `B` configurations is drawn depends on the law.  The block-uniform structured
+laws (`mrf_cobuild`, `mrf_substitute`) are drawn as **exact iid** samples by the count collapse
+of their within-block coupling (`structured_sampling.sample_structured`): at the coupling
+`block_c` leaves, a fuel block has a metastable all-on mode a Gibbs sweep cannot cross, so
+Gibbs would not reproduce the calibrated marginals.  Every other law is drawn by **Gibbs**
+(`mrf.gibbs_sweep`): `bernoulli` (J = 0, so a sweep is already iid) and any dense law with no
+count summary.  For Gibbs an ensemble of `B` chains is advanced `--thin` sweeps between solves;
+for the exact laws a fresh batch of `B` iid draws is taken each round.  Either way the batch is
+solved through the same worker pool and screened-contingency augmentation the enumeration uses
+(`evaluator.for_case`, `enumerate_configs.solve_chunk`), so each recorded solve is exact for the
+full N-1 problem.  Configurations are keyed by their **bit vector** (packed), not the MSB-first
+int64 id every other cache uses -- that id overflows past ngen 63.
 
 Resumable across jobs.  After each round the chain states, the RNG state, and the next round
 index are written to `state.json`; a new job reloads them and continues the same chains, so a
@@ -45,8 +49,9 @@ import pandas as pd
 
 from src.cases import registry
 from src.model import evaluator
-from src.sampling.distributions import case_dist
+from src.sampling.distributions import STRUCTURED_NAMES, case_dist
 from src.sampling.mrf import gibbs_sweep, _sigmoid
+from src.sampling.structured_sampling import sample_structured
 from src.sweeps.enumerate_configs import solve_chunk
 
 DUAL_COLUMNS = ["round", "chain", "n_on", "constraint", "mu"]
@@ -93,12 +98,14 @@ def save_state(out_dir, X, rng, next_round, meta):
     tmp.replace(out_dir / "state.json")
 
 
-def load_or_init(out_dir, ngen, p, chains, warmup, h, J, seed):
-    """Resume the chain ensemble from a checkpoint, or start (and warm up) a fresh one.
+def load_or_init(out_dir, ngen, chains, warmup, h, J, seed, iid):
+    """Resume the sampler from a checkpoint, or start a fresh one.
 
-    A fresh start draws each chain from the independent marginals and burns in `warmup`
-    Gibbs sweeps so the first solved batch is already at the law's stationary distribution;
-    a resumed run keeps the chains exactly as the last job left them.
+    A resumed run restores the RNG and the next round exactly as the last job left them.  A
+    fresh Gibbs start draws each chain from the independent marginals and burns in `warmup`
+    sweeps so the first solved batch is already at the law's stationary distribution; a fresh
+    exact (`iid`) start needs no chain state or warm-up -- each round draws a new batch -- so it
+    returns a placeholder ensemble the round loop overwrites.
     """
     ckpt = out_dir / "state.json"
     if ckpt.exists():
@@ -108,6 +115,9 @@ def load_or_init(out_dir, ngen, p, chains, warmup, h, J, seed):
         print(f"resuming from round {s['next_round']} ({len(s['X'])} chains)", flush=True)
         return np.array(s["X"], dtype=np.int8), rng, s["next_round"]
     rng = np.random.default_rng(seed)
+    if iid:
+        print(f"fresh start: {chains} exact iid draws per round", flush=True)
+        return np.zeros((chains, ngen), dtype=np.int8), rng, 0
     X = (rng.random((chains, ngen)) < _sigmoid(h)).astype(np.int8)
     for _ in range(warmup):
         gibbs_sweep(h, J, X, rng)
@@ -118,17 +128,22 @@ def load_or_init(out_dir, ngen, p, chains, warmup, h, J, seed):
 def run(case, law_name, args):
     """Advance and solve rounds until the round cap or the wall-time budget, checkpointing each."""
     mrf = case_dist(case, law_name)
+    exact = law_name in STRUCTURED_NAMES
+    groups = case.candidate_groups()
     out_dir = case.results_dir / "mcmc" / law_name
     out_dir.mkdir(parents=True, exist_ok=True)
-    X, rng, start = load_or_init(out_dir, case.ngen, case.build_p(), args.chains,
-                                 args.warmup, mrf.h, mrf.J, args.seed)
+    X, rng, start = load_or_init(out_dir, case.ngen, args.chains, args.warmup,
+                                 mrf.h, mrf.J, args.seed, exact)
     meta = {"case": case.name, "law": law_name, "chains": args.chains, "thin": args.thin,
             "warmup": args.warmup, "screened": args.screened}
     t0, stop = time.time(), start + args.rounds
     with evaluator.for_case(case, case.relief_buses(), screened=args.screened) as target:
         for rnd in range(start, stop):
-            for _ in range(args.thin):
-                gibbs_sweep(mrf.h, mrf.J, X, rng)
+            if exact:
+                X = sample_structured(mrf.h, mrf.J, groups, args.chains, rng)
+            else:
+                for _ in range(args.thin):
+                    gibbs_sweep(mrf.h, mrf.J, X, rng)
             rows = solve_chunk(case, target, X, functools.partial(make_rows, rnd), None, rnd)
             write_round(out_dir, rnd, rows)
             save_state(out_dir, X, rng, rnd + 1, meta)
