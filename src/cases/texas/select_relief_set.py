@@ -7,7 +7,7 @@ diverse config sample under FULL relief (every load bus), collects the union of 
 that actually shed, and checks that restricting relief to that set reproduces the scalar
 target S on a fresh HELD-OUT config sample (the set is frozen before the held-out actives
 are seen, so it is a real generalization test). The set is written to the active case's
-data/<case>_relief_set.json, which the registry loads and every solve picks up.
+data/<case>/relief_set.json, which the registry loads and every solve picks up.
 
 The full sweep additionally saves, per config, the worst line overload and the system-wide
 shed: any config needing a bus outside the set stays feasible via overload / the system
@@ -85,7 +85,8 @@ def select(case, collect=400, validate=200, seed=7, workers=None):
     # A sweep input, not a sweep output: written to data/ beside the case it belongs to,
     # under the name the registry expects to load it from.
     final = sorted(relief_set.union(*active_val))
-    dest = registry.DATA / f"{case.name}_relief_set.json"
+    dest = case.relief_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(final))
     verdict = "PASS" if dS.max() <= DS_TOL else "REVIEW (S mismatch on held-out)"
     print(f"\n{verdict}: wrote {len(final)} relief buses -> {dest}")

@@ -98,7 +98,7 @@ matched solver-call budget. The key is `(method, ascent_move)`.
 | `problem.py` | `Problem` / `TargetProblem` for one cached case: loads `S`, the nominal law (as a generic weight vector), exact ground truth, per-config targets, bit/id helpers; mints `Evaluator`s (call counter). Reads the case list from `cases.registry`. |
 | `distributions.py` | Named nominal laws over `ngen` bits. `marginal_vector` fixes the marginals, then `make_dist` lays the coupling keyed by name on top (`DIST_NAMES`, `STRUCTURED_NAMES`, `P_STD`); `case_dist` returns a registered case's stored law and `case_law_names` filters a requested list down to what a case can have. |
 | `build_laws.py` | Builds each named law at a case's marginals and technology groups and stores it — the only place a field is ever solved. Every coupled law's field comes from `mrf.calibrate_field`, so its marginals match Bernoulli's to solver precision. |
-| `law_store.py` | Reads and writes a law's full definition, `results/<case>/laws/<name>.json`: `h`, `J`, target and realized marginals, groups, coupling. |
+| `law_store.py` | Reads and writes a law's full definition, tracked `data/<case>/<name>.json`: `h`, `J`, target and realized marginals, groups, coupling. |
 | `mrf.py` | `MarkovRandomField` (pairwise binary MRF) — the only file that knows the law's form; `calibrate_field` solves for the field that reproduces given marginals under a given coupling. |
 | `diagnostics.check_law_coupling` | Per-law marginal error, bit correlations, distance to Bernoulli, and exact mu exceedance — the check that two laws differ in correlation only. |
 | `sensitivity.proxy` | Barrier-sensitivity proxy `s_k(x)` ranking which generator flip to evaluate; drives the `best`/`top5` ascent moves (`--proxy cached` or `live`). |
@@ -151,8 +151,8 @@ The project is an editable install rooted at `src/`, so modules import by name f
 directory. Run the module form (`-m`):
 
 A case's nominal laws are built and stored once, before anything samples or plots under
-them; `case_dist` then only reads `results/<case>/laws/<name>.json`, and a law that has
-not been built is an error rather than a silent rebuild.
+them; `case_dist` then only reads the tracked `data/<case>/<name>.json`, and a law that
+has not been built is an error rather than a silent rebuild.
 
 ```bash
 uv run python -m src.sampling.build_laws --case all

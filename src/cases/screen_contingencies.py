@@ -19,8 +19,8 @@ its own dispatch, and a chunk that turns one up is redone after `augment_screene
 here.  Screening is what keeps a 2^20 enumeration affordable; the growth is what keeps it
 exact.  The better this screen is, the fewer times a sweep has to stop and rebuild.
 
-Writes `data/<case>_screened.json` (the full case with its contingency set filtered) and
-`data/<case>_contingencies_screened.json` (the kept names, the recipe screened under, and
+Writes `data/<case>/screened.json` (the full case with its contingency set filtered) and
+`data/<case>/contingencies.json` (the kept names, the recipe screened under, and
 the stress set, so a screen is reproducible from its own record).
 
 A screened record with no `emergency_factor` predates this file and was screened at the

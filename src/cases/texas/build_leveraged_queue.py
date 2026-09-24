@@ -222,7 +222,8 @@ def main():
         picks = draw(pool, quota, modes, args.min_screen_mw, args.topn, args.seed)
         tag = f"lev{args.seed}" + (f"a{args.aggregate}" if args.aggregate > 1 else "")
 
-    out = DATA / (args.out or f"activsg2000_queue{ncand}_{tag}.json")
+    out = DATA / (args.out or f"activsg2000_v12_{tag}/queue.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"seed": args.seed, "nmodes": args.nmodes,
                                "aggregate": args.aggregate, "modes": modes,
                                "candidates": to_candidates(picks)}, indent=2))

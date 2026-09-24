@@ -1,8 +1,8 @@
 """Build and store a case's nominal laws -- run once, after which nothing recomputes them.
 
 Each named law is constructed at the case's own build probabilities and technology
-groups, verified against those marginals by exact enumeration, and written to
-`results/<case>/laws/<name>.json`.  Every coupled law solves its field over all 2^ngen
+groups, verified against those marginals by exact enumeration, and written to the tracked
+per-case laws directory `data/<case>/laws/<name>.json`.  Every coupled law solves its field over all 2^ngen
 configurations, which at ngen = 20 costs seconds for a weak coupling and tens of seconds
 for the structured ones; that cost is paid here and nowhere else.
 

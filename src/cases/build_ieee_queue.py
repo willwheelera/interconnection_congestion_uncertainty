@@ -29,8 +29,8 @@ Construction, applied identically to case14 / case30 / case118:
     severe congestion the sweep measures;
   - an N-1 single-branch-outage contingency is added for every non-bridge branch.
 
-Writes two files per case: the EGRET case (data/<case>.json) and its queue
-(data/<case>_candidates.json), whose per-candidate build probabilities are the sampling law.
+Writes two files per case: the EGRET network (data/<case>.json, shared/flat) and its queue
+(data/<case>/queue.json), whose per-candidate build probabilities are the sampling law.
 
 Usage:
     uv run python -m src.cases.build_ieee_queue
@@ -265,7 +265,9 @@ def build(case, solver="gurobi"):
     elements["contingency"] = branch_contingencies(elements)
 
     case.case_file.write_text(json.dumps({"elements": elements, "system": system}))
-    case.paths.get("candidates", registry.DATA / f"{name}_candidates.json").write_text(
+    queue_path = case.candidates_path()
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text(
         json.dumps({"seed": SEED, "network": spec["network"], "candidates": candidates},
                    indent=2))
     report(name, elements, candidates, costs, loads)

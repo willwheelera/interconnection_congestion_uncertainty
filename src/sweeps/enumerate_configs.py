@@ -9,7 +9,7 @@ direct-Monte-Carlo check or the low-cardinality shell.
 `--screened` solves the screened contingency set and stays exact by growing it: every
 solve checks the contingencies screening dropped against its own dispatch, and a chunk
 that turns any of them up is redone after the set is enlarged and written back to
-`data/<case>_screened.json`.  What lands in the cache is therefore always the full
+`data/<case>/screened.json`.  What lands in the cache is therefore always the full
 problem's solution.  Measured on activsg2000_original_v12, snapshot 2025-02-19 06:00:
 26.4 ms/config to solve the 33-contingency screened set, 38.2 with the check
 (`model.dropped_flows`), against 570.4 for the full 2756-contingency set outright.

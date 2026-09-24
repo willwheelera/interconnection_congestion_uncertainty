@@ -20,8 +20,11 @@ each kind shares a name stem, so a `--case` substring selects the whole kind:
                  same SCDCOPF recipe as ACTIVSg2000 but a single load level (so its
                  sweeps parallelize over configurations).
 
-Paths follow the `data/<case>*.json` and `results/<case>/` convention and are derived
-from the case name; `paths` overrides an entry for the cases whose files predate it.
+Each case's own inputs -- queue, screened case, relief set, contingencies, and nominal
+laws -- live together in `data/<case>/`; the shared physical model (the network, the
+snapshot collection, and the queue shared by the incumbent-fleet cases) stays flat in
+`data/`, and outputs go under `results/<case>/`.  `paths` overrides an entry for a shared
+or legacy file (the network, or a pre-convention name).
 """
 
 import json
@@ -86,32 +89,45 @@ class Case:
     # -- inputs ------------------------------------------------------------------
 
     @property
+    def data_dir(self) -> Path:
+        """The per-case directory holding this case's own inputs -- queue, screened case,
+        relief set, contingencies, laws.  The shared physical model stays flat in data/."""
+        return DATA / self.name
+
+    @property
     def case_file(self) -> Path:
-        """The full case: every N-1 contingency, no screening."""
+        """The full case: every N-1 contingency, no screening (shared, flat in data/)."""
         return self.paths.get("case", DATA / f"{self.name}.json")
 
     @property
     def screened_file(self) -> Path:
         """The case restricted to the contingencies that ever bind."""
-        return self.paths.get("screened", DATA / f"{self.name}_screened.json")
+        return self.paths.get("screened", self.data_dir / "screened.json")
 
     @property
     def contingency_file(self) -> Path:
         """The kept-contingency name list written alongside the screened case."""
-        return self.paths.get("contingencies",
-                              DATA / f"{self.name}_contingencies_screened.json")
+        return self.paths.get("contingencies", self.data_dir / "contingencies.json")
+
+    def candidates_path(self) -> Path:
+        """The queue file's path whether or not it exists (candidates_file guards existence)."""
+        return self.paths.get("candidates", self.data_dir / "queue.json")
 
     @property
     def candidates_file(self) -> Path | None:
         """The queue file defining the candidates and their build probabilities."""
-        p = self.paths.get("candidates", DATA / f"{self.name}_candidates.json")
-        return p if p and Path(p).exists() else None
+        p = self.candidates_path()
+        return p if Path(p).exists() else None
+
+    def relief_path(self) -> Path:
+        """The relief-set file's path whether or not it exists (relief_file guards existence)."""
+        return self.paths.get("relief", self.data_dir / "relief_set.json")
 
     @property
     def relief_file(self) -> Path | None:
         """The slim ORDC relief bus set, when one has been selected and validated."""
-        p = self.paths.get("relief", DATA / f"{self.name}_relief_set.json")
-        return p if p and Path(p).exists() else None
+        p = self.relief_path()
+        return p if Path(p).exists() else None
 
     @property
     def snapshots_file(self) -> Path | None:
@@ -274,23 +290,22 @@ def _texas(name, one_mu, case_file, **paths) -> Case:
                        "snapshots": _TX_SNAPSHOTS, **paths})
 
 
-def _leveraged(tag, ngen=20, queue=None, sample_only=False) -> Case:
+def _leveraged(tag, ngen=20, sample_only=False) -> Case:
     """One activsg2000_original_v12 variant differing only in which queue sits on top.
 
     Same network, fleet, and snapshots as v12, so the sweeps compare directly.  The
     relief set and the screened contingency set are *not* inherited from v12: both
     depend on which buses the queue sits at, so each variant selects and screens its
     own.  `one_mu` is unset because the most congested element is not known until the
-    case is swept.  `ngen`/`queue` default to the 20-candidate draw; a larger draw (the
-    q28 variant) passes both explicitly.  `sample_only` marks the full-queue variant,
-    whose 2^ngen space is too large to enumerate and is estimated by MCMC instead.
+    case is swept.  `ngen` defaults to the 20-candidate draw; a larger draw (the q28
+    variant) passes it explicitly.  The queue is the case's own input at
+    `data/<case>/queue.json`.  `sample_only` marks the full-queue variant, whose 2^ngen
+    space is too large to enumerate and is estimated by MCMC instead.
     """
     name = f"activsg2000_v12_{tag}"
-    candidates = DATA / (queue or f"activsg2000_queue20_{tag}.json")
     return Case(name=name, model="scdcopf", ngen=ngen,
                 ingest="long", parallel="snapshot", one_mu=None, sample_only=sample_only,
-                paths={"case": DATA / "activsg2000.json", "candidates": candidates,
-                       "snapshots": _TX_SNAPSHOTS})
+                paths={"case": DATA / "activsg2000.json", "snapshots": _TX_SNAPSHOTS})
 
 
 def _ieee(name, network, ngen, one_mu) -> Case:
@@ -337,16 +352,14 @@ CASES: dict[str, Case] = {
     # A larger aggregated leveraged draw: seven candidates per fuel instead of five, so
     # 28 configuration bits (2^28 configurations) rather than 20.  Same v12 network,
     # fleet, snapshots, and construction as lev0a3 -- only the per-fuel quota changed.
-    "activsg2000_v12_q28_lev0a3": _leveraged(
-        "q28_lev0a3", ngen=28, queue="activsg2000_queue28_lev0a3.json"),
+    "activsg2000_v12_q28_lev0a3": _leveraged("q28_lev0a3", ngen=28),
 
     # The full leveraged pool: every candidate that clears the shift-factor screen, no
     # per-fuel quota and no aggregation (195 candidates, blocks Wind 25 / Solar 51 /
     # Battery 95 / Gas 24).  2^195 is unenumerable, so this case is sampled by MCMC under
     # a coupled MRF nominal law (sampling.mcmc_sweep), never swept -- sample_only guards
     # the 1<<ngen enumeration paths against it.
-    "activsg2000_v12_levfull": _leveraged(
-        "levfull", ngen=195, queue="activsg2000_queue_levfull.json", sample_only=True),
+    "activsg2000_v12_levfull": _leveraged("levfull", ngen=195, sample_only=True),
 
     # Incumbent-fleet IEEE queue testbeds: the network's own generators stay online and
     # a queue is added on top, under the same recipe as Texas so the five cases are

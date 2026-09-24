@@ -17,8 +17,8 @@ leveraged queue, ngen ~ 195) cannot do that, so its laws are built here instead:
     a Gibbs run does not reproduce the calibrated marginals -- the same reason the cluster
     sweep draws these laws by the exact count collapse rather than by Gibbs.
 
-The stored file is the same `results/<case>/laws/<name>.json` the enumerated cases write, so
-`mcmc_sweep` and any figure read a law the same way whatever built it.  `ref_block` (the
+The stored file is the same tracked `data/<case>/laws/<name>.json` the enumerated cases write,
+so `mcmc_sweep` and any figure read a law the same way whatever built it.  `ref_block` (the
 block size the per-node coupling is normalized to) and `coupling` are recorded so the scaling
 a law was built under is recoverable.
 
