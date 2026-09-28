@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FuncFormatter
 
-FIG_W = 6.0                       # total figure width, inches (two-column text-block limit)
+FIG_W = 7.0                       # total figure width, inches (two-column text-block limit)
 PANEL_ASPECT = 2.5 / 2.2          # margin_grid panel width / height
 MARGIN_IN = {"left": 0.42, "right": 0.06, "bottom": 0.32, "top": 0.34}   # decoration bands
 TITLE_IN, LEGEND_IN = 0.04, 0.19  # inches from the top edge down to the title / legend top
@@ -89,7 +89,21 @@ def margin_grid(nrow, ncol, sharey=False, aspect=PANEL_ASPECT, w=FIG_W, **kwargs
     return fig, axs
 
 
-def fraction_grid(nrow, ncol, head=0.07, foot=0.14, lft=0.1, rgt=0.14, 
+def square_grid_height(fig, nrow, ncol, top_in, bottom_in, left_in, right_in=MARGIN_IN["right"]):
+    """Figure height (inches) that makes a margin_grid's panels square under the given inch bands.
+
+    A transposed grid overrides margin_grid's default margins (a wide left band for the line
+    labels, a short bottom band once the legend is dropped) but keeps the height margin_grid set
+    from the default margins, so the panels stretch to fill the leftover vertical space.  Panel
+    width follows from the width left after the left/right bands; sizing the height so the panel
+    band equals that width per panel restores square panels.  Uses the grid's current
+    wspace/hspace."""
+    sp = fig.subplotpars
+    panel_w = (fig.get_figwidth() - left_in - right_in) / (ncol + (ncol - 1) * sp.wspace)
+    return panel_w * (nrow + (nrow - 1) * sp.hspace) + top_in + bottom_in
+
+
+def fraction_grid(nrow, ncol, head=0.07, foot=0.14, lft=0.1, rgt=0.14,
                     wspace=0.020, hspace=0.04, sharex="col", sharey="row"):
     """Fixed-width nrow x ncol grid whose margins and gaps are figure fractions.
 

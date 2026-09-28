@@ -39,11 +39,12 @@ from matplotlib.lines import Line2D
 
 from src.sampling.problem import case_tag, create_problem
 from src.sampling.distributions import DIST_NAMES, DIST_LABEL, case_law_names
-from src.figures.style import COLORS
+from src.figures.style import COLORS, DIST_COLOR
 from src.figures.mu_distributions._line_stats import mean_abs_mu, select_lines
 from src.figures.mu_distributions._experiment_reads import direct_samples, direct_slice
 from src.figures.mu_distributions._panel_layout import (FONT, LABEL_IN, LEGEND_IN, TITLE_IN,
-                                           margin_grid, one_sigfig_yaxis, panel_title)
+                                           margin_grid, one_sigfig_yaxis, panel_title,
+                                           square_grid_height)
 
 EST_COLOR = "tab:blue"#COLORS["direct"]      # the direct estimate points and their bars (direct = red, repo-wide)
 CAPSIZE = 2.0                     # error-bar cap width (points)
@@ -51,7 +52,7 @@ FLOOR_PAD = 0.08                  # y-range padding as a fraction of a line's ow
 ROW_ASPECT = 1.0                  # transposed panels: width / height
 LEFT_WIDE_IN = 0.66               # transposed left margin (in): room for the long "line" labels
 TOP_WIDE_IN = 0.30               # transposed top margin (in): suptitle plus the column titles
-BOTTOM_WIDE_IN = 0.58             # transposed bottom margin (in): budget x ticks, x label, key
+BOTTOM_WIDE_IN = 0.28             # transposed bottom margin (in): budget x ticks, x label, key
 
 
 def direct_mean_frame(samples, mu, line_names, dists, budgets, rep=0):
@@ -87,7 +88,7 @@ def budget_ticklabels(budgets):
     return [str(budgets[0])] + [""] * (n //2 - 1) + [str(budgets[n//2])] + [""] * (n //2 - 1)
 
 
-def errorbar_panel(ax, sub, budgets, truth, ylim):
+def errorbar_panel(ax, sub, budgets, truth, ylim, color):
     """One (law, line) panel: per-budget estimate with a standard-error bar, plus exact truth.
 
     Budget is the x axis, one slot per budget from small to large; only the endpoint budgets are
@@ -96,7 +97,7 @@ def errorbar_panel(ax, sub, budgets, truth, ylim):
     for i, b in enumerate(budgets):
         p = sub[sub["budget"] == b]
         ax.errorbar(i, float(p["est"].iloc[0]), yerr=float(p["se"].iloc[0]), fmt="o",
-                    ms=2, color=EST_COLOR, ecolor=EST_COLOR, elinewidth=1.0, capsize=CAPSIZE,
+                    ms=2, color=color, ecolor=color, elinewidth=1.0, capsize=CAPSIZE,
                     zorder=4)
         #ax.errorbar(i+0.3, float(p["est"].iloc[0]), yerr=sigma/b**0.5, fmt="", ecolor="magenta", elinewidth=0.5)
     ax.axhline(truth, color="k", ls="--", lw=0.6, zorder=5)
@@ -106,6 +107,8 @@ def errorbar_panel(ax, sub, budgets, truth, ylim):
     ax.set_ylim(*ylim)
     ax.tick_params(labelsize=FONT["tick"], pad=1.5)
     ax.tick_params(axis="x", length=0)
+    ax.tick_params(axis="y", which="major", length=2.5)
+    ax.tick_params(axis="y", which="minor", length=1.5)
     one_sigfig_yaxis(ax, steps=(1, 2, 5, 10), sci_above=1000)
 
 
@@ -143,10 +146,10 @@ def decorate_grid(fig, handles, title, supy_x, legend_title=None, legend_bottom=
     h = fig.get_figheight()
     loc, anchor = (("lower center", (0.5, LABEL_IN / h)) if legend_bottom
                    else ("upper center", (0.5, 1 - LEGEND_IN / h)))
-    fig.legend(handles=handles, loc=loc, bbox_to_anchor=anchor, title=legend_title,
-               ncol=len(handles), frameon=True, fontsize=FONT["legend"],
-               title_fontsize=FONT["axlabel"], handletextpad=0.3, columnspacing=0.8,
-               borderpad=0.3, handlelength=1.4)
+    #fig.legend(handles=handles, loc=loc, bbox_to_anchor=anchor, title=legend_title,
+    #           ncol=len(handles), frameon=True, fontsize=FONT["legend"],
+    #           title_fontsize=FONT["axlabel"], handletextpad=0.3, columnspacing=0.8,
+    #           borderpad=0.3, handlelength=1.4)
     #fig.suptitle(title, y=1 - TITLE_IN / h, fontsize=FONT["suptitle"])
     fig.supylabel(r"$\hat{E}[\,|\mu_l|\,]$", x=supy_x, fontsize=FONT["axlabel"])
 
@@ -168,7 +171,7 @@ def figure_lines_as_cols(frame, dorder, order_names, name_index, truths, budgets
         for j, name in enumerate(order_names):
             ax = axs[i, j]
             errorbar_panel(ax, sub_d[sub_d["line"] == name], budgets,
-                           float(truths[d][name_index[name]]), ylims[name])
+                           float(truths[d][name_index[name]]), ylims[name], DIST_COLOR[d])
             if i == 0:
                 panel_title(ax, f"line {name}")
             if j == 0:
@@ -185,21 +188,23 @@ def figure_lines_as_rows(frame, dorder, order_names, name_index, truths, budgets
     title the columns from outside the box; budget is the x axis of every panel, endpoint-labeled,
     the same as the default grid."""
     fig, axs = margin_grid(len(order_names), len(dorder), sharey="row", aspect=ROW_ASPECT,
-                           wspace=0.1, w=3)
+                           wspace=0.1, w=3.4)
     ylims = line_ylims(frame, truths, order_names, name_index, dorder)
     for i, name in enumerate(order_names):
         for j, d in enumerate(dorder):
             ax = axs[i, j]
             sub = frame[(frame["dist"] == d) & (frame["line"] == name)]
-            errorbar_panel(ax, sub, budgets, float(truths[d][name_index[name]]), ylims[name])
+            errorbar_panel(ax, sub, budgets, float(truths[d][name_index[name]]), ylims[name], DIST_COLOR[d])
             if i == 0:
                 ax.set_title(DIST_LABEL[d], fontsize=FONT["panel_title"], pad=3)
             if j == 0:
                 ax.set_ylabel(f"{name}", fontsize=FONT["panel_title"])
-    h = fig.get_figheight()
+    h = square_grid_height(fig, len(order_names), len(dorder), TOP_WIDE_IN, BOTTOM_WIDE_IN,
+                           LEFT_WIDE_IN)
+    fig.set_figheight(h)
     fig.subplots_adjust(left=LEFT_WIDE_IN / fig.get_figwidth(),
                         top=1 - TOP_WIDE_IN / h, bottom=BOTTOM_WIDE_IN / h)
-    fig.supxlabel("sampling budget", y=(LABEL_IN + 0.25) / h, fontsize=FONT["axlabel"])
+    fig.supxlabel("sampling budget", y=(LABEL_IN + 0.0) / h, fontsize=FONT["axlabel"])
     decorate_grid(fig, grid_legend(), title, supy_x=LABEL_IN / fig.get_figwidth(),
                   legend_bottom=True)
     return fig
@@ -219,7 +224,7 @@ def run(case, dists=DIST_NAMES, budgets=None, transpose=False):
     baseline = create_problem(c, dists[0])
     mu, line_names = baseline.mu_table()
     truths = law_truths(c, dists, mu)
-    idx, order_names = select_lines(mu, line_names, baseline.w, n=5)
+    idx, order_names = select_lines(mu, line_names, baseline.w, n=3)
     name_index = {name: i for name, i in zip(order_names, idx)}
     frame = direct_mean_frame(samples, mu, line_names, dists, budgets)
 

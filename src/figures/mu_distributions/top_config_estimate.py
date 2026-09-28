@@ -36,7 +36,8 @@ from src.sampling.distributions import DIST_NAMES, DIST_LABEL, case_law_names
 from src.figures.style import DIST_COLOR
 from src.figures.mu_distributions._line_stats import exceedance_prob, mean_abs_mu, select_lines
 from src.figures.mu_distributions._panel_layout import (FONT, LABEL_IN, LEGEND_IN, TITLE_IN,
-                                           margin_grid, one_sigfig_yaxis, panel_title)
+                                           margin_grid, one_sigfig_yaxis, panel_title,
+                                           square_grid_height)
 
 ROW_ASPECT = 1.0                 # transposed panels: width / height
 LEFT_WIDE_IN = 0.66              # transposed left margin (in): room for the long line labels
@@ -119,6 +120,7 @@ def estimate_panel(ax, est_dl, truth, color, kmax, ylim):
     ax.set_ylim(*ylim)
     ax.tick_params(labelsize=FONT["tick"], pad=1.5)
     ax.tick_params(axis="x", length=0)
+    ax.tick_params(axis="y", length=2.5)
     one_sigfig_yaxis(ax, steps=(1, 2, 5, 10), sci_above=1000)
 
 
@@ -161,7 +163,7 @@ def figure_lines_as_cols(est, dists, order_idx, order_names, truths, ranges, yla
 def figure_lines_as_rows(est, dists, order_idx, order_names, truths, ranges, ylabel, title, kmax):
     """Transposed grid: congested lines down the rows, laws across the columns."""
     fig, axs = margin_grid(len(order_idx), len(dists), sharey="row", aspect=ROW_ASPECT,
-                           wspace=0.1, w=3)
+                           wspace=0.1, w=3.4)
     for i, l in enumerate(order_idx):
         for j, d in enumerate(dists):
             estimate_panel(axs[i, j], est[d][l], float(truths[d][l]), DIST_COLOR[d], kmax,
@@ -170,11 +172,13 @@ def figure_lines_as_rows(est, dists, order_idx, order_names, truths, ranges, yla
                 axs[i, j].set_title(DIST_LABEL[d], fontsize=FONT["panel_title"], pad=3)
             if j == 0:
                 axs[i, j].set_ylabel(f"{order_names[i]}", fontsize=FONT["panel_title"])
+    h = square_grid_height(fig, len(order_idx), len(dists), TOP_WIDE_IN, BOTTOM_WIDE_IN,
+                           LEFT_WIDE_IN)
+    fig.set_figheight(h)
     fig.subplots_adjust(left=LEFT_WIDE_IN / fig.get_figwidth(),
-                        top=1 - TOP_WIDE_IN / fig.get_figheight(),
-                        bottom=BOTTOM_WIDE_IN / fig.get_figheight())
+                        top=1 - TOP_WIDE_IN / h, bottom=BOTTOM_WIDE_IN / h)
     fig.supxlabel("No. top configs averaged",
-                  y=(LABEL_IN + 0.26) / fig.get_figheight(), fontsize=FONT["axlabel"])
+                  y=(LABEL_IN + 0.26) / h, fontsize=FONT["axlabel"])
     decorate_grid(fig, title, ylabel, supy_x=LABEL_IN / fig.get_figwidth(), legend_bottom=True)
     return fig
 
@@ -228,7 +232,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=100.0,
                         help="exceedance level c for the threshold-probability statistic")
     parser.add_argument("--n-configs", type=int, default=10)
-    parser.add_argument("--n-lines", type=int, default=5)
+    parser.add_argument("--n-lines", type=int, default=3)
     parser.add_argument("--transpose", action="store_true")
     args = parser.parse_args()
 
