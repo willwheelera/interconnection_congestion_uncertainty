@@ -21,7 +21,7 @@ One figure per case (all laws in the one frame), one column per line, most-conge
 Usage:
     uv run python -m src.figures.mu_distributions.mu_distribution_difference --case case30_gen_per_bus
     uv run python -m src.figures.mu_distributions.mu_distribution_difference --case case30_gen_per_bus \
-        --baseline bernoulli --mrfs mrf_b,mrf_cobuild,mrf_substitute --n-lines 5 --bins 40
+        --baseline bernoulli --mrfs mrf_a,mrf_cobuild,mrf_substitute --n-lines 5 --bins 40
 """
 
 import argparse
@@ -36,7 +36,7 @@ from src.cases.registry import get_case
 from src.sampling.problem import case_tag, create_problem
 from src.sampling.distributions import DIST_LABEL
 from src.figures.style import COLORS, DIST_COLOR
-from src.figures.mu_distributions._line_stats import select_lines
+from src.figures.mu_distributions._line_stats import mean_abs_mu, select_lines
 from src.figures.mu_distributions._panel_layout import FIG_W, FONT, one_sigfig_yaxis, fraction_grid, panel_title
 
 
@@ -45,28 +45,26 @@ def bin_mass(v, w, edges):
     return np.histogram(v, bins=edges, weights=w)[0]
 
 
-def congested_mean(v, w, floor):
-    """Weighted mean of |mu_l| over the congested region (|mu_l| > floor), matching the drawn mass."""
-    m = v > floor
-    return np.average(v[m], weights=w[m])
-
-
 def line_column(top, bot, v, weights, baseline, mrfs, colors, name, floor, bins):
-    """Fill one line's column: Bernoulli mass on top, each MRF's difference below."""
+    """Fill one line's column: Bernoulli mass on top, each MRF's difference below.
+
+    The dashed mean line is the unconditional exact E[|mu_l|] (mean_abs_mu), the same
+    per-line mean used to rank lines and drawn in top_config_mu; the histogram omits the
+    uncongested mass at 0, so on a rarely-congested line the mean sits left of the bars."""
     edges = np.linspace(floor, float(v.max()), bins + 1)
     base = bin_mass(v, weights[baseline], edges)
     top.stairs(base, edges, fill=True, color=DIST_COLOR["bernoulli"], alpha=0.55, lw=0)
-    top.axvline(congested_mean(v, weights[baseline], floor), color=DIST_COLOR["bernoulli"],
+    top.axvline(mean_abs_mu(v, weights[baseline]), color=DIST_COLOR["bernoulli"],
                 lw=0.5, ls="--", zorder=3)
     for mrf in mrfs:
         top.stairs(bin_mass(v, weights[mrf], edges), edges, color=colors[mrf], lw=0.6)
-        bot.stairs(bin_mass(v, weights[mrf], edges) - base, edges, color=colors[mrf], lw=1.0)
-        bot.axvline(congested_mean(v, weights[mrf], floor), color=colors[mrf],
+    #    bot.stairs(bin_mass(v, weights[mrf], edges) - base, edges, color=colors[mrf], lw=1.0)
+        top.axvline(mean_abs_mu(v, weights[mrf]), color=colors[mrf],
                     lw=0.5, ls="--", zorder=3)
-    bot.axhline(0.0, color="k", lw=0.5, zorder=1)
-    panel_title(top, f"line {name}")
-    for ax in (top, bot):
-        ax.tick_params(labelsize=5.5)
+    #bot.axhline(0.0, color="k", lw=0.5, zorder=1)
+    panel_title(top, f"{name}")
+    for ax in (top, ):#bot):
+        ax.tick_params(labelsize=5.5, length=2)
 
 
 def grid_legend(baseline, mrfs, colors):
@@ -82,12 +80,12 @@ def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins,
     shown = list(zip(idx, names))
     print(f"showing {len(shown)} lines")
     colors = {m: DIST_COLOR[m] for m in mrfs}
-    fig, axs, figh = fraction_grid(2, len(shown), 
+    fig, axs, figh = fraction_grid(1, len(shown), foot=0.2,
 #head=0.055, foot=0.172, lft=0.113, rgt=0.133, wspace=0.049, hspace=0.095,
                                    )
 
     for col, (i, name) in enumerate(shown):
-        line_column(axs[0, col], axs[1, col], mu[:, i], weights, baseline, mrfs, colors,
+        line_column(axs[0, col], axs[0, col], mu[:, i], weights, baseline, mrfs, colors,
                     name, floor, bins)
 
     for j in range(len(shown)):
@@ -95,19 +93,19 @@ def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins,
         axs[0, j].xaxis.set_major_locator(MaxNLocator(nbins=4))
     axs[0, 0].set_ylabel(f"prob. mass", fontsize=FONT["axlabel"])
     #axs[0, 0].set_ylabel(f"{DIST_LABEL[baseline]}\nprob. mass", fontsize=FONT["axlabel"])
-    axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
+    #axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
 
     y_range = 0.6
     axs[0, 0].set_ylim([0, y_range])
-    m = axs[1, 0].get_ylim()[0]
-    axs[1, 0].set_ylim([m, m+y_range])
+    #m = axs[1, 0].get_ylim()[0]
+    #axs[1, 0].set_ylim([m, m+y_range])
 
     fig.legend(handles=grid_legend(baseline, mrfs, colors), loc="center left",
                bbox_to_anchor=(1 - 0.8 / FIG_W, 0.5), ncol=1, title="Differences", title_fontsize=FONT["legend"],
                frameon=True, fontsize=FONT["legend"], handlelength=1.6, borderpad=0.3)
     #fig.suptitle(f"{case}: |mu| distribution and its change under coupling  |  full enumeration",
     #             y=1 - 0.08 / figh, fontsize=8)
-    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.06 / figh, fontsize=FONT["axlabel"])
+    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.00 / figh, fontsize=FONT["axlabel"])
     out = case_dir / f"mu_distribution_difference_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
@@ -130,7 +128,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", default="activsg2000_v12_lev3a3")
     parser.add_argument("--baseline", default="bernoulli")
-    parser.add_argument("--mrfs", default="mrf_b,mrf_cobuild,mrf_substitute")
+    parser.add_argument("--mrfs", default="mrf_a,mrf_cobuild,mrf_substitute")
     parser.add_argument("--bins", type=int, default=20)
     parser.add_argument("--n-lines", type=int, default=5)
     parser.add_argument("--mu-floor", type=float, default=1e-2,

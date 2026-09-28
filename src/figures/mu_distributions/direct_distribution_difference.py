@@ -86,11 +86,11 @@ def line_column(top, bot, mu, i, w, budget_ids, colors, name, floor, bins):
     for b, ids in budget_ids.items():
         m = bin_mass(mu[ids, i], np.full(len(ids), 1.0 / len(ids)), edges)
         top.stairs(m, edges, color=colors[b], lw=0.7)
-        bot.stairs(m - base, edges, color=colors[b], lw=1.0)
-    bot.axhline(0.0, color="k", lw=0.5, zorder=1)
-    panel_title(top, f"line {name}")
-    for ax in (top, bot):
-        ax.tick_params(labelsize=5.5)
+        #bot.stairs(m - base, edges, color=colors[b], lw=1.0)
+    #bot.axhline(0.0, color="k", lw=0.5, zorder=1)
+    panel_title(top, f"{name}")
+    for ax in (top, ):#bot):
+        ax.tick_params(labelsize=5.5, length=2)
 
 
 def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_lines, case_dir,
@@ -105,30 +105,30 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
     shown = list(zip(idx, names))
     budget_ids = budget_first_rep_ids(samples, dist, budgets)
     colors = budget_colors(budgets)
-    fig, axs, figh = fraction_grid(2, len(shown), head=0.13)
+    fig, axs, figh = fraction_grid(1, len(shown), head=0.13, foot=0.2)
 
     for col, (i, name) in enumerate(shown):
-        line_column(axs[0, col], axs[1, col], mu, i, w, budget_ids, colors, name, floor, bins)
+        line_column(axs[0, col], axs[0, col], mu, i, w, budget_ids, colors, name, floor, bins)
 
     for j, (i, _) in enumerate(shown):
         axs[0, j].set_xlim(0., 1.02 * float(mu[:, i].max()))
         axs[0, j].xaxis.set_major_locator(MaxNLocator(nbins=4))
-    axs[0, 0].set_ylabel("exact\nprob. mass", fontsize=FONT["axlabel"])
-    axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
+    axs[0, 0].set_ylabel("prob. mass", fontsize=FONT["axlabel"])
+    #axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
 
     axs[0, 0].set_ylim(0, 0.6)
     bound = 0.05 #max(abs(v) for v in axs[1, 0].get_ylim()) * 1.5
-    axs[1, 0].set_ylim(-bound, bound)
+    #axs[1, 0].set_ylim(-bound, bound)
     one_sigfig_yaxis(axs[0, 0])
-    one_sigfig_yaxis(axs[1, 0])
+    #one_sigfig_yaxis(axs[1, 0])
 
     fig.legend(handles=grid_legend(budgets, colors), loc="center left",
                bbox_to_anchor=(1 - 0.8 / FIG_W, 0.5), ncol=1, title="budget",
                title_fontsize=FONT["legend"], frameon=True, fontsize=FONT["legend"],
                handlelength=1.6, borderpad=0.3)
-    fig.suptitle(f"{case}: direct  " rf"$|\mu_l|$ error  |  {DIST_LABEL[dist]}, {meta['n_rep']} reps",
-                 y=1 - 0.045 / figh, fontsize=FONT["suptitle"])
-    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.06 / figh, fontsize=FONT["axlabel"])
+    #fig.suptitle(f"{case}: direct  " rf"$|\mu_l|$ error  |  {DIST_LABEL[dist]}, {meta['n_rep']} reps",
+    #             y=1 - 0.045 / figh, fontsize=FONT["suptitle"])
+    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.0 / figh, fontsize=FONT["axlabel"])
     out = case_dir / f"direct_distribution_difference_{dist}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")
