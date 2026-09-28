@@ -2,7 +2,7 @@
 
 The nominal-law transpose of line_exceed_strip.py.  That figure fixes one law and spreads
 the sampling budgets along the x axis, one figure per law; here direct sampling is the only
-method and all four nominal laws (Bernoulli, MRF-B, MRF-co, MRF-sub) share one figure.  Every
+method and all four nominal laws (Bernoulli, MRF-A, MRF-co, MRF-sub) share one figure.  Every
 (law, line) pair gets its own panel: within a panel the sampling budget is the x axis and each
 budget's replicate estimates are jittered points, read against that law's exact nominal-weighted
 truth (the dashed line).  A line's panels share one y scale so its estimate can be read across
@@ -190,7 +190,7 @@ def figure_lines_as_rows(frame, dorder, order_names, name_index, truths, budgets
     return fig
 
 
-def run(case, dists=DIST_NAMES, budgets=None, threshold=200.0, transpose=False):
+def run(case, dists=DIST_NAMES, budgets=None, threshold=100.0, transpose=False):
     """One direct-only strip figure over the nominal laws; returns it.
 
     The |mu_l| table and the sample frame are law-independent and built once; each law's exact
@@ -204,7 +204,7 @@ def run(case, dists=DIST_NAMES, budgets=None, threshold=200.0, transpose=False):
     baseline = create_problem(c, dists[0])
     mu, line_names = baseline.mu_table()
     truths, _ = law_truths(c, dists, mu, threshold)
-    idx, order_names = select_lines(mu, line_names, baseline.w, n=5)
+    idx, order_names = select_lines(mu, line_names, baseline.w, n=3)
     name_index = {name: i for name, i in zip(order_names, idx)}
     frame = direct_exceed_frame(samples, mu, line_names, dists, budgets, threshold)
 

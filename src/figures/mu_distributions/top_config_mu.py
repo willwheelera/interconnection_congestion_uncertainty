@@ -128,7 +128,7 @@ def plot_top_configs(case, problems, mu, line_names, dists, threshold, n_lines, 
     return fig
 
 
-def run(case, dists, threshold=100.0, n_lines=4, n_configs=5):
+def run(case, dists, threshold=100.0, n_lines=5, n_configs=5):
     """One most-probable-configuration figure per case, every law overlaid by color."""
     c = get_case(case)
     dists = case_law_names(c, dists)
