@@ -135,5 +135,5 @@ if __name__ == "__main__":
     dists = "bernoulli,mrf_cobuild,mrf_substitute"
     for i in range(4):
         case = f"activsg2000_v12_lev{i}a3"
-        run(case, ["bernoulli","mrf_b"])#dists.split(","))
+        run(case, ["bernoulli","mrf_a"])#dists.split(","))
     plt.show()

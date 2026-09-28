@@ -15,7 +15,7 @@ which would wash the budget out.
 
 Usage:
     uv run python -m src.figures.mu_distributions.exact_vs_sampled_box --case activsg2000_v12_lev3a3
-    uv run python -m src.figures.mu_distributions.exact_vs_sampled_box --dist mrf_b \
+    uv run python -m src.figures.mu_distributions.exact_vs_sampled_box --dist mrf_a \
         --budgets 640,2560,10240 --n-lines 12 --yscale symlog
 """
 

@@ -12,7 +12,7 @@ data/<case>/
   screened.json         # the screened case (screened_file)
   contingencies.json    # kept contingency names + recipe (contingency_file)
   relief_set.json       # the ORDC relief bus set (relief_file)
-  laws/<name>.json      # nominal laws: bernoulli, mrf_cobuild, mrf_substitute, mrf_b
+  laws/<name>.json      # nominal laws: bernoulli, mrf_cobuild, mrf_substitute, mrf_a
 ```
 
 The **shared physical model** stays flat in `data/`, because many cases sit on it:

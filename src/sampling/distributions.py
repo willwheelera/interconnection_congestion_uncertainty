@@ -39,17 +39,16 @@ import numpy as np
 from src.sampling.law_store import load_law
 from src.sampling.mrf import MarkovRandomField, calibrate_field
 
-DIST_NAMES = ["bernoulli", "mrf_b", "mrf_cobuild", "mrf_substitute"]
+DIST_NAMES = ["bernoulli", "mrf_a", "mrf_cobuild", "mrf_substitute"]
 STRUCTURED_NAMES = ["mrf_cobuild", "mrf_substitute"]   # couple within the queue's fuels
 DIST_LABEL = {                      # display name of every law, shared by the figures
-    "bernoulli": "Bernoulli", "mrf_a": "MRF-A", "mrf_b": "MRF-B",
+    "bernoulli": "Bernoulli", "mrf_a": "MRF-A",
     "mrf_cobuild": "MRF co", "mrf_substitute": "MRF sub",
 }
 P_STD = 0.15                        # marginal spread shared by every law
 COUPLINGS = {                       # (mean, std) of the Gaussian pair coefficients J
     "bernoulli": (0.0, 0.0),
-    "mrf_a": (0.0, 0.15),           # zero mean -> mixed-sign, strong frustration
-    "mrf_b": (0.0, 2.00),           # zero mean -> mixed-sign, strong frustration
+    "mrf_a": (0.0, 2.00),           # zero mean -> mixed-sign, strong frustration
 }
 GROUP_COUPLING = 2.0                # pair coefficient magnitude of the structured laws
 

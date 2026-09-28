@@ -20,7 +20,7 @@ enumerated, so every config's nominal weight is known.
 Usage:
     uv run python -m src.figures.mu_distributions.nominal_pmf_concentration --case activsg2000_v12_lev3a3
     uv run python -m src.figures.mu_distributions.nominal_pmf_concentration --case activsg2000_v12_lev3a3 \
-        --dists bernoulli,mrf_b
+        --dists bernoulli,mrf_a
 """
 
 import argparse

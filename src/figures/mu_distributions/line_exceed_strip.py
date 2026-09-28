@@ -218,7 +218,7 @@ def main():
 if __name__ == "__main__":
     for i in range(3,4):
         case = f"activsg2000_v12_lev{i}a3"
-        dists = ["bernoulli", "mrf_b", "mrf_cobuild", "mrf_substitute"]
+        dists = ["bernoulli", "mrf_a", "mrf_cobuild", "mrf_substitute"]
         targets = ["sum_mu"]
         run(case, dists, targets, threshold=500)
     plt.show()

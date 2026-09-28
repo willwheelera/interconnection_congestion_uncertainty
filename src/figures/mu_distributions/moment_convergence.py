@@ -16,7 +16,7 @@ estimator converging; a bar that stays wide is a moment the budget does not yet 
 Usage:
     uv run python -m src.figures.mu_distributions.moment_convergence --case activsg2000_v12_lev3a3
     uv run python -m src.figures.mu_distributions.moment_convergence --case activsg2000_v12_lev3a3 \
-        --dists bernoulli,mrf_b --target sum_mu
+        --dists bernoulli,mrf_a --target sum_mu
 """
 
 import argparse

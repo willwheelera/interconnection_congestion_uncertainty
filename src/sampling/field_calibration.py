@@ -1,6 +1,6 @@
 """Calibrate an MRF's field h to target marginals p under a fixed coupling J, by MCMC.
 
-For a dense coupling (MRF-B puts an independent coefficient on every pair) the marginals
+For a dense coupling (MRF-A puts an independent coefficient on every pair) the marginals
 have no scalar summary to collapse onto, so they must be estimated by Gibbs sampling and
 the field fit by stochastic moment matching -- there is no exact route as there is for the
 uniform-within-block structured laws.

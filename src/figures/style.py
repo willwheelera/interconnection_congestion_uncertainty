@@ -28,7 +28,7 @@ COLORS = {
 }
 _VIRIDIS = colormaps["viridis"](np.linspace(0.1, 0.8, 4))   # dark to light, one per law
 DIST_COLOR = {                      # law -> color, shared by the per-line enumeration figures
-    "bernoulli": (_VIRIDIS[0] + np.array([.2, 0, 0, 0])), "mrf_b": _VIRIDIS[1],
+    "bernoulli": (_VIRIDIS[0] + np.array([.2, 0, 0, 0])), "mrf_a": _VIRIDIS[1],
     "mrf_cobuild": _VIRIDIS[2], "mrf_substitute": _VIRIDIS[3],
 }
 LABELS = {
