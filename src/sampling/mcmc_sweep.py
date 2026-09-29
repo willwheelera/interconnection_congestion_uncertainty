@@ -16,8 +16,10 @@ count summary.  For Gibbs an ensemble of `B` chains is advanced `--thin` sweeps 
 for the exact laws a fresh batch of `B` iid draws is taken each round.  Either way the batch is
 solved through the same worker pool and screened-contingency augmentation the enumeration uses
 (`evaluator.for_case`, `enumerate_configs.solve_chunk`), so each recorded solve is exact for the
-full N-1 problem.  Configurations are keyed by their **bit vector** (packed), not the MSB-first
-int64 id every other cache uses -- that id overflows past ngen 63.
+full N-1 problem.  Each law solves against its own screened set, copied from the prepared base
+and grown independently (`per_law_case`), so the concurrent law jobs never share a mutable file.
+Configurations are keyed by their **bit vector** (packed), not the MSB-first int64 id every
+other cache uses -- that id overflows past ngen 63.
 
 Resumable across jobs.  After each round the chain states, the RNG state, and the next round
 index are written to `state.json`; a new job reloads them and continues the same chains, so a
@@ -27,6 +29,8 @@ round on resume.
 
 Output, under `results/<case>/mcmc/<law>/`:
 
+    screened.json                  this law's own screened case, grown as it solves (--screened)
+    contingencies.json             the kept-contingency record for that screened case
     state.json                     the checkpoint: X (B x ngen), RNG state, next round, meta
     duals/part_XXXXXXXX.parquet    round, chain, n_on, constraint, mu   (snapshot-averaged)
     snapmax/part_XXXXXXXX.parquet  round, chain, n_on, snapshot, max_mu, ... , load_shed_mw
@@ -39,8 +43,10 @@ Usage:
 """
 
 import argparse
+import dataclasses
 import functools
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -125,13 +131,31 @@ def load_or_init(out_dir, ngen, chains, warmup, h, J, seed, iid):
     return X, rng, 0
 
 
+def per_law_case(case, out_dir):
+    """A copy of `case` whose screened set lives under `out_dir`, seeded from the shared base.
+
+    Each law grows its own screened contingency set so the concurrent law jobs never write a
+    shared file.  Seeded once from the prepared `data/<case>/screened.json`; a resumed link
+    finds the grown copy already there and keeps it.
+    """
+    screened = out_dir / "screened.json"
+    contingencies = out_dir / "contingencies.json"
+    if not screened.exists():
+        shutil.copyfile(case.screened_file, screened)
+        shutil.copyfile(case.contingency_file, contingencies)
+    return dataclasses.replace(
+        case, paths={**case.paths, "screened": screened, "contingencies": contingencies})
+
+
 def run(case, law_name, args):
     """Advance and solve rounds until the round cap or the wall-time budget, checkpointing each."""
+    out_dir = case.results_dir / "mcmc" / law_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.screened:
+        case = per_law_case(case, out_dir)
     mrf = case_dist(case, law_name)
     exact = law_name in STRUCTURED_NAMES
     groups = case.candidate_groups()
-    out_dir = case.results_dir / "mcmc" / law_name
-    out_dir.mkdir(parents=True, exist_ok=True)
     X, rng, start = load_or_init(out_dir, case.ngen, args.chains, args.warmup,
                                  mrf.h, mrf.J, args.seed, exact)
     meta = {"case": case.name, "law": law_name, "chains": args.chains, "thin": args.thin,

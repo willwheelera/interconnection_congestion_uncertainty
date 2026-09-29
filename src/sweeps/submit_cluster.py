@@ -25,10 +25,11 @@ own per-round output.  Its stored laws (`data/<case>_law_*.json`, built locally 
 
 The sweep skips chunks that are already cached, so a job stopped at the walltime is
 continued by the next link, and a case whose enumeration is already complete gets only the
-reduction.  The links are chained rather than run side by side: a screened sweep rewrites
-its own contingency set as it discovers binders, and two jobs on one case would race for
-that file.  The MCMC laws chain for the same reason -- they share the one screened set.
-Cores are filled by the worker pool within a job.
+reduction.  The enumeration links are chained rather than run side by side: a screened sweep
+rewrites its own contingency set as it discovers binders, and two jobs on one case would race
+for that file.  The MCMC laws instead run side by side -- each grows its own per-law screened
+set (`mcmc_sweep.per_law_case`), so they share no mutable file -- while the links within a
+law stay chained.  Cores are filled by the worker pool within a job.
 
 There is no audit job.  The sweep checks every solve against the contingencies screening
 dropped and grows its set whenever one is violated, so the cache is exact when it is
@@ -168,24 +169,23 @@ def submit_sweep(case, depend):
 
 
 def submit_mcmc(case, depend):
-    """One resumable MCMC chain per law for a sample-only case, the laws chained.
+    """One resumable MCMC chain per law for a sample-only case, the laws run side by side.
 
-    Each law's `mcmc_sweep` writes its own results/<case>/mcmc/<law>/, but they all grow the
-    single screened contingency set as they solve, so two at once would race for it -- the
-    same reason the enumeration links are chained.  Within a law, LINKS jobs each resume the
-    last one's `state.json` and sample another `MCMC_MAX_HOURS`; the first job of the whole
-    chain waits on preparation, every job after it on the one before (`afterany`, so a link
-    that hits the walltime is still continued).
+    Each law grows its own screened contingency set under its results/<case>/mcmc/<law>/
+    (`mcmc_sweep.per_law_case`), so the laws share no mutable file and need not be serialized:
+    every law's chain starts from preparation.  Within a law, LINKS jobs each resume the last
+    one's `state.json` and sample another `MCMC_MAX_HOURS`; the first waits on preparation
+    (`afterok`), every job after it on the one before (`afterany`, so a link that hits the
+    walltime is still continued).
     """
     screened = ["--screened"] if SCREENED else []
-    kind = "afterok"
     for law in SAMPLE_LAWS:
         args = ["--law", law, "--max-hours", str(MCMC_MAX_HOURS), *screened]
+        link, kind = depend, "afterok"
         for _ in range(LINKS):
-            depend = sbatch(f"mcmc-{law}-{case.name}", "src.sampling.mcmc_sweep", case,
-                            SWEEP_TIME, depend=depend, kind=kind, args=args)
+            link = sbatch(f"mcmc-{law}-{case.name}", "src.sampling.mcmc_sweep", case,
+                          SWEEP_TIME, depend=link, kind=kind, args=args)
             kind = "afterany"
-    return depend
 
 
 def submit_target(case, depend):
