@@ -171,7 +171,7 @@ def figure_lines_as_rows(est, dists, order_idx, order_names, truths, ranges, yla
             if i == 0:
                 axs[i, j].set_title(DIST_LABEL[d], fontsize=FONT["panel_title"], pad=3)
             if j == 0:
-                axs[i, j].set_ylabel(f"{order_names[i]}", fontsize=FONT["panel_title"])
+                axs[i, j].set_ylabel("ABC"[i], fontsize=FONT["panel_title"])
     h = square_grid_height(fig, len(order_idx), len(dists), TOP_WIDE_IN, BOTTOM_WIDE_IN,
                            LEFT_WIDE_IN)
     fig.set_figheight(h)

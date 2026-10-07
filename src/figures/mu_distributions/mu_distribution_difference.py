@@ -77,6 +77,7 @@ def grid_legend(baseline, mrfs, colors):
 def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins, n_lines, case_dir):
     """One two-row figure: Bernoulli shape on top, MRF-minus-baseline difference below."""
     idx, names = select_lines(mu, line_names, weights[baseline], n=n_lines)
+    names = "ABCDE"
     shown = list(zip(idx, names))
     print(f"showing {len(shown)} lines")
     colors = {m: DIST_COLOR[m] for m in mrfs}
@@ -105,7 +106,7 @@ def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins,
                frameon=True, fontsize=FONT["legend"], handlelength=1.6, borderpad=0.3)
     #fig.suptitle(f"{case}: |mu| distribution and its change under coupling  |  full enumeration",
     #             y=1 - 0.08 / figh, fontsize=8)
-    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.00 / figh, fontsize=FONT["axlabel"])
+    fig.supxlabel(r"Congestion price $|\mu_l|$ (\$/MWh)", y=0.00 / figh, fontsize=FONT["axlabel"])
     out = case_dir / f"mu_distribution_difference_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")

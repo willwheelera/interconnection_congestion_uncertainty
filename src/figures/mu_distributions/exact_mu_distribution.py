@@ -81,6 +81,7 @@ def dist_legend():
 def plot_distribution(case, problem, mu, line_names, dist, floor, bins, n_lines, ymin, case_dir):
     """One figure: the exact |mu_l| distribution, one panel per shown line."""
     idx, names = select_lines(mu, line_names, problem.w, n=n_lines)
+    names = "ABCDE"
     shown = list(zip(idx, names))
     print(f"{dist}: showing {len(shown)} lines")
     column = {n: i for i, n in shown}

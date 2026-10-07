@@ -102,6 +102,7 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
     across lines and the bottom row shares its own (error), symmetric about zero, so the same
     error reads at the same height on every line."""
     idx, names = select_lines(mu, line_names, w, n=n_lines)
+    names = "ABCDE"
     shown = list(zip(idx, names))
     budget_ids = budget_first_rep_ids(samples, dist, budgets)
     colors = budget_colors(budgets)
@@ -128,7 +129,7 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
                handlelength=1.6, borderpad=0.3)
     #fig.suptitle(f"{case}: direct  " rf"$|\mu_l|$ error  |  {DIST_LABEL[dist]}, {meta['n_rep']} reps",
     #             y=1 - 0.045 / figh, fontsize=FONT["suptitle"])
-    fig.supxlabel(r"Congestion price $|\mu_l|$", y=0.0 / figh, fontsize=FONT["axlabel"])
+    fig.supxlabel(r"Congestion price $|\mu_l|$ (\$/MWh)", y=0.0 / figh, fontsize=FONT["axlabel"])
     out = case_dir / f"direct_distribution_difference_{dist}_{case_tag(case)}.pdf"
     fig.savefig(out)
     print(f"saved -> {out}")

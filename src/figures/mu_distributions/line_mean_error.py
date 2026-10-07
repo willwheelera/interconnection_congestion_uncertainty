@@ -198,7 +198,7 @@ def figure_lines_as_rows(frame, dorder, order_names, name_index, truths, budgets
             if i == 0:
                 ax.set_title(DIST_LABEL[d], fontsize=FONT["panel_title"], pad=3)
             if j == 0:
-                ax.set_ylabel(f"{name}", fontsize=FONT["panel_title"])
+                ax.set_ylabel("ABC"[i], fontsize=FONT["panel_title"])
     h = square_grid_height(fig, len(order_names), len(dorder), TOP_WIDE_IN, BOTTOM_WIDE_IN,
                            LEFT_WIDE_IN)
     fig.set_figheight(h)

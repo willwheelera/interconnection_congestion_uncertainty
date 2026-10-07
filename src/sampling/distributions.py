@@ -42,8 +42,8 @@ from src.sampling.mrf import MarkovRandomField, calibrate_field
 DIST_NAMES = ["bernoulli", "mrf_a", "mrf_cobuild", "mrf_substitute"]
 STRUCTURED_NAMES = ["mrf_cobuild", "mrf_substitute"]   # couple within the queue's fuels
 DIST_LABEL = {                      # display name of every law, shared by the figures
-    "bernoulli": "Bernoulli", "mrf_a": "MRF-A",
-    "mrf_cobuild": "MRF co", "mrf_substitute": "MRF sub",
+    "bernoulli": "Bernoulli", "mrf_a": "MRF-all",
+    "mrf_cobuild": "MRF-co", "mrf_substitute": "MRF-sub",
 }
 P_STD = 0.15                        # marginal spread shared by every law
 COUPLINGS = {                       # (mean, std) of the Gaussian pair coefficients J

@@ -78,7 +78,7 @@ def config_panel(ax, mu_line, tops, means, dists, name, n_configs):
     ax.set_xlim(-0.6, n_configs - 0.4)
     ax.set_xticks(ranks)
     ax.set_xticklabels([str(k + 1) for k in ranks])
-    panel_title(ax, f"line {name}")
+    panel_title(ax, f"{name}")
     ax.tick_params(labelsize=FONT["tick"], pad=1.5)
     ax.tick_params(axis="x", length=0)
     mu_yaxis(ax)
@@ -111,9 +111,9 @@ def plot_top_configs(case, problems, mu, line_names, dists, threshold, n_lines, 
     print(f"{(prob > 0).sum()} lines congested at threshold, showing {len(order)}")
 
     fig, axs, figh = fraction_grid(1, len(order), lft=0.07, foot=0.15)
-    for l, ax in zip(order, axs.ravel()):
+    for l, ax, name in zip(order, axs.ravel(), "ABCDE"):
         config_panel(ax, mu[:, l], tops, {d: means[d][l] for d in dists}, dists,
-                     line_names[l], n_configs)
+                     name, n_configs)
     axs.ravel()[0].set_ylim(0, panel_ylim(mu, tops, means, order, dists))
 
     fig.legend(handles=config_legend(dists), loc="center left",
