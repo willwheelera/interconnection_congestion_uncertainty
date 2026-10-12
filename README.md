@@ -1,4 +1,4 @@
-# AMPS — Electricity Market Sensitivity Analysis
+# Electricity Market Congestion Price Analysis
 
 Research project studying congestion dual variables (shadow prices of line thermal limits) over different generator availability in DC optimal power flow and unit commitment problems.
 
