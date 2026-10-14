@@ -12,16 +12,15 @@ EGRET.
 | `evaluator.py` | `ConfigParallel` / `SnapshotParallel` over one shared worker body; `for_case` picks by the case's parallel axis. |
 | `dropped_flows.py` | `DroppedFlowCheck` — post-outage flows for a set of contingencies, from stored flow-shift columns rather than a network solve each. |
 | `enforce_contingencies.py` | `ContingencyEnforcer` — adds back the contingency limits EGRET's lazy loop skipped, so no dispatch is returned unheld. |
-| `dcopf.py` | Plain DCOPF for the legacy `gen_per_bus` testbeds. |
 
 Constraint ids are `base:{line}` for normal thermal limits and `ctg:{contingency}:{line}`
-for post-contingency ones, in both case families.
+for post-contingency ones.
 
 ## The recipe
 
 Three ingredients make the mu distribution realistic rather than degenerate.  They live in
 `cases.registry.Recipe`, per case, so no environment variable selects them and no script
-has its own copy.  The derivation is in `notes/ercot_price_formation.md`.
+has its own copy.  Each is explained below.
 
 | constant | value | meaning |
 |---|---|---|
@@ -35,8 +34,8 @@ has its own copy.  The derivation is in `notes/ercot_price_formation.md`.
 usable band where a handful of constraints bind at realistic magnitudes.  An emergency
 factor is used in practice, allowing modest overloads in response to an outage that can be
 resolved by corrective action.  The ACTIVSg2000 case JSONs carry `rating_emergency = 1.5 x
-long_term` baked in by `cases.texas.convert_model`; the 1.2 is applied at model-build time
-by `relief.set_emergency_factor`, so it never appears in the data files.  **Any screening or
+long_term` baked into the data; the 1.2 is applied at model-build time by
+`relief.set_emergency_factor`, so it never appears in the data files.  **Any screening or
 diagnostic that reads a case JSON without that override is solving at 1.5.**
 
 **2. ORDC-shaped nodal relief.** EGRET's single system-wide slack cannot represent a pocket

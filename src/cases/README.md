@@ -9,22 +9,19 @@ that the registry points at.
 | `registry.py` | Every case: model, paths, recipe, queue.  Read by every stage; `--case` accepts a name, a name substring, or `all`. |
 | `build_ieee_queue.py` | Builds `case14/30/118_queue`: incumbents, candidate siting/cost/capacity/build probability, provisional ratings, N-1 contingency set. |
 | `calibrate_ratings.py` | Relaxes ratings round by round until the incumbent-only grid is N-1 secure. |
-| `build_gen_per_bus.py` | Builds the legacy DCOPF testbed `case30_gen_per_bus`. |
+| `prepare_case.py` | The two sweep inputs in order: the slim relief set, then the screened contingencies, at the case's own recipe. |
 | `screen_contingencies.py` | Drops contingencies that never bind across stress configurations, at the case's own recipe.  Approximate — for fast runs, not for ground truth. |
-| `texas/` | One-time construction of the ACTIVSg2000 cases from ERCOT and MATPOWER sources; see its README. |
+| `texas/select_relief_set.py` | Chooses the slim ORDC relief bus set for the ACTIVSg2000 cases (used by `prepare_case`).  The one-time ACTIVSg2000 construction from ERCOT and MATPOWER sources lives on the `archive` branch. |
 
 ## The incumbent-fleet IEEE testbeds
 
-`case14_queue`, `case30_queue`, and `case118_queue` exist to remove two confounds in the
-older `case14_gen_per_bus` / `case30_gen_per_bus` testbeds (`notes/paper_plan.md` §3):
-
-1. **No incumbent fleet.** There, every generator is a queue candidate, so the all-off
-   configuration is an empty grid served entirely by priced load shed.  Here the IEEE
-   network's own generators stay permanently online and the queue is added on top, matching
-   the Texas cases where a queue perturbs a real fleet.
-2. **DCOPF vs SCDCOPF.** There the model is plain DCOPF while Texas is N-1
-   security-constrained, so comparisons confound network size with physical model.  Here
-   all three are N-1 SCDCOPF under the same recipe as Texas.
+`case14_queue`, `case30_queue`, and `case118_queue` are small, fast examples of the same setup
+as the ACTIVSg2000 cases: the network's own generators stay permanently online and the queue
+is added on top (an incumbent fleet that the build-out perturbs), and all three are N-1
+security-constrained DCOPF under the same recipe as the Texas cases.  This makes them
+enumerable stand-ins that exercise the whole pipeline in minutes.  `case14_queue` and
+`case30_queue` ship with committed inputs on this branch; `case118_queue` is buildable from
+`build_ieee_queue` (its committed inputs are on `archive`).
 
 | case | buses | branches | contingencies | incumbents | candidates | configurations |
 |---|---|---|---|---|---|---|
@@ -71,10 +68,10 @@ screened case when one exists, which is what makes them fast.
 **Screen at the recipe you solve at.** Which contingencies bind depends on the emergency
 factor, the relief available, and the cap, so `screen_contingencies` drives its stress
 configurations through the same `model.scdcopf` path a sweep uses.  A set screened at a case
-JSON's native (looser) rating omits binders the tightened factor needs.  The committed Texas
-screened sets predate this file and came from a 24-configuration draw with a different
-generator, so re-running will not reproduce them exactly — re-screen a Texas case only when
-you mean to replace its set.
+JSON's native (looser) rating omits binders the tightened factor needs.  Screening draws a
+random spread of stress configurations, so re-running will not reproduce an earlier set
+exactly — the sweep's own augmentation (see `src/README.md`) is what makes the ground truth
+exact regardless.
 
 **Candidate capacity and siting.** Each candidate is 6–14% of system load (total queue ≈ 2x
 load, in line with real interconnection queues), sited by greedy farthest-point sampling on

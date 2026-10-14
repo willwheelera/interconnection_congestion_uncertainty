@@ -1,79 +1,36 @@
-# cases/texas — building the ACTIVSg2000 testbeds
+# cases/texas — ACTIVSg2000 relief selection
 
-One-time construction of the three Texas cases from MATPOWER, PowerWorld, and ERCOT
-sources.  Their outputs are the `data/activsg2000*` files that `cases.registry` points at,
-and they are already committed — rerun these only to rebuild an input.
-
-The synthetic ACTIVSg2000 grid is 2000 buses, 3206 branches, and 544 base generators.  A
-*configuration* is a length-20 bit vector over ERCOT interconnection-queue candidates, each
-either built or not.  The three registered cases differ only in the incumbent fleet:
-
-| case | fleet | notes |
-|---|---|---|
-| `activsg2000_original` | the model's own ~2016 fleet | historical run at the JSON's native 1.5 emergency factor; kept for its enumerated cache |
-| `activsg2000_original_v12` | the same ~2016 fleet | re-solved under the current factor-1.2 soft-cap recipe |
-| `activsg2000_2025` | 2025 fleet (CDR additions 2017–2025) | the primary Texas case |
-
-The physical model and the recipe they are solved under are documented in
-`src/model/README.md`, not here.
-
-## Pipeline
-
-```bash
-# network
-uv run python -m src.cases.texas.convert_model              # MATPOWER + .aux -> data/activsg2000.json
-uv run python -m src.cases.texas.compile_resource_additions # ERCOT CDR unit tables -> additions CSV
-uv run python -m src.cases.texas.add_cdr_resources          # -> data/activsg2000_2025.json
-
-# load and renewable snapshots (needs an ERCOT token)
-source gridstatus_api_key.sh                            # see src/ercot/ercot_auth.py
-uv run python -m src.cases.texas.fetch_load_snapshots --n 8
-uv run python -m src.cases.texas.build_load_snapshots       # -> data/activsg2000_load_collection.json
-uv run python -m src.cases.texas.fetch_renewable_snapshots
-uv run python -m src.cases.texas.build_renewable_availability   # per-fuel capacity factor per snapshot
-
-# queue
-uv run python -m src.cases.texas.build_queue_distribution   # -> data/activsg2000_queue20.json
-
-# contingency screening, at the recipe the sweep solves
-uv run python -m src.cases.screen_contingencies --case activsg2000_2025
-
-# slim nodal relief set (see src/model/README.md)
-uv run python -m src.cases.texas.select_relief_set --case activsg2000_2025
-```
-
-Then `sweeps.enumerate_configs` for the ground truth; see `src/README.md`.
-
-## Files
+The ACTIVSg2000 (synthetic ERCOT) cases are built from the shared network
+`data/activsg2000.json`, the load snapshots `data/activsg2000_load_collection.json`, and each
+case's own leveraged queue `data/<case>/queue.json` — all committed.  On this branch, the only
+construction step that still runs as part of preparing a case is choosing the slim relief set:
 
 | file | role |
 |---|---|
-| `convert_model.py` | MATPOWER + PowerWorld `.aux` → EGRET JSON with coordinates, ERCOT weather zones, emergency ratings, and the N-1 contingency set. |
-| `compile_resource_additions.py` | Compile ERCOT resources added 2017–2025 from the CDR unit-detail tables. |
-| `add_cdr_resources.py` | Add those additions to ACTIVSg2000 as new generators → the 2025 fleet. |
-| `fetch_load_snapshots.py` | Pull ERCOT actual zonal load for the high-congestion hours. |
-| `build_load_snapshots.py` | Turn those into per-zone load scale factors (8 snapshots). |
-| `fetch_renewable_snapshots.py` | Pull ERCOT actual wind and solar output for the same hours. |
-| `build_renewable_availability.py` | Attach a per-fuel capacity factor to each snapshot. |
-| `build_queue_distribution.py` | Select 20 ERCOT queue projects, match them to buses geographically, set each candidate's Bernoulli `p`. |
-| `select_relief_set.py` | Collect the buses that ever shed under full relief, validate the slim set reproduces `S` on held-out configurations → `data/<case>_relief_set.json`. |
+| `select_relief_set.py` | Collect the buses that ever shed load under full ORDC relief, validate that restricting relief to that set reproduces the target `S` on held-out configurations, and write `data/<case>/relief_set.json`.  Called by `cases.prepare_case`. |
 
-`diagnostics/identify_relief_set.py` is the earlier timing/certification variant of the
-last one, kept as a diagnostic.
+The synthetic ACTIVSg2000 grid is 2000 buses, 3206 branches, and 544 base generators.  A
+*configuration* is a bit vector over ERCOT interconnection-queue candidates (20 for the
+`lev*a3` cases, 195 for `levfull`), each either built or not.
 
-## Notes
+## Why a slim relief set
 
-**The candidate queue is shared.** All three cases use `data/activsg2000_queue20.json` and
-`data/activsg2000_load_collection.json`; only the incumbent fleet differs.  That is what
-makes the two fleets a controlled comparison — same network, same queue, same recipe — and
-it is the basis of the descriptor-instability result in `notes/paper_plan.md` §5.
+A full relief generator at every load bus enlarges the LP about 5x — an inactive relief
+column is still factorized on every warm re-solve — while only a handful of ACTIVSg2000's load
+buses ever shed.  The relief set is a sweep **input**: it lives in `data/<case>/relief_set.json`
+and `Case.relief_buses()` falls back to every load bus until one is selected.  The recipe it
+supports (emergency factor, ORDC-shaped nodal relief, shadow-price cap) is documented in
+`src/model/README.md`.
 
-**Candidate cost comes from fuel.** The ERCOT queue file records a project's fuel rather
-than a marginal cost, so `cases.registry.FUEL_COST` maps fuel → $/MWh when normalizing
-candidates.  Renewables and storage discharge are zero-cost; thermal costs sit above the
-existing fleet's ~$17–19 so new thermal runs only when cheaper units are exhausted.
+```bash
+uv run python -m src.cases.prepare_case --case activsg2000_v12_lev3a3   # runs select_relief_set, then screening
+```
 
-**FarWest stays capped at 1.5.** The zone-scale cap was left where it is rather than
-rebuilding the network: this case is a proof of concept, not a claim to be "2025 ERCOT."
-2025 congestion in the real system is rural 115 kV (Llano, Val Verde, Washington, Kenedy,
-Brazoria), not FarWest.
+## The full construction, on `archive`
+
+Building the ACTIVSg2000 cases from source — the MATPOWER/PowerWorld network conversion, the
+ERCOT CDR fleet additions, the ERCOT load and renewable snapshot pulls, and the leveraged-queue
+construction — is a one-time process whose committed outputs are the `data/activsg2000*` files
+the registry points at.  Those construction scripts (`convert_model`, `add_cdr_resources`,
+`fetch_*`, `build_leveraged_queue`, `screen_bus_leverage`, …) live on the `archive` branch;
+they are not needed to reproduce the paper from the committed inputs.

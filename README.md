@@ -1,62 +1,50 @@
-# AMPS — Electricity Market Sensitivity Analysis
+# AMPS — Congestion price uncertainty from the interconnection queue
 
-Research project studying congestion dual variables (shadow prices of line thermal limits) over different generator availability in DC optimal power flow and unit commitment problems.
+This repository estimates how uncertain generation-interconnection outcomes move wholesale
+**congestion prices**, by Monte Carlo sampling.
 
-## Research goal
+A generator interconnection queue is a set of proposed projects, each of which may or may not
+be built.  Which ones are built shifts power flows and therefore the congestion shadow prices
+(the dual variables `μ` of transmission limits) that set locational price differences.  On the
+planning timescale this is a source of price uncertainty that single-scenario studies miss.
 
-The overall goal is estimating distribution of locational marginal prices (LMPs) given a probability function for every combination of generators (available or not available) — useful for market analysis and generator siting.
-Our study focuses on predicting transmission congestion, the main driver of high LMPs.
-Specifically, given a transmission network and a probability function for generator configurations, we ask: "what is the probability that the congestion shadow price of line l exceeds a threshold value?"
-The space of generator configurations is too large to enumerate, necessitating a reliable sampling scheme.
-Since congestion is relatively rare and difficult to predict, importance sampling is likely needed.
+Given a probability distribution over which queued projects are built, we:
 
-A candidate importance function is the prior probability times the sum of shadow prices across the network for each generator configuration.
-The normalization for this function is unknown.
-A local scheme for biasing acceptance probabilities and move proposals in exchange for importance weights is preferable.
-"Local" means informed by neighbors, i.e., configurations that differ by one generator (on/off).
-The increase or decrease in congestion prices from a configuration to its neighbor can inform move proposal and acceptance.
+1. draw configurations of the queue (each project on/off) from that distribution,
+2. solve a security-constrained DC optimal power flow for each one, averaged over a few
+   high-load snapshots of the year, and
+3. estimate, for every line and contingency, the full distribution of `μ`, its mean, and the
+   probability it exceeds a price threshold.
 
-The main point of interest is very large values of mu, which are rare.
-Finding the probability of rare events is difficult using random sampling.
-We consider approaches that use an ascent strategy to locate local maxima, and calculate corresponding weights to determine probabilities.
+The central result is that **plain direct Monte Carlo is enough**: a small number of samples
+estimates these quantities well, and does better than picking the one or few most likely
+build-outs.  This is not a rare-event problem — over the worst hours of the year congestion is
+a common outcome across the distribution of build-outs — so no importance sampling is needed.
+The size of the uncertainty problem is set by the queue, not the network, and the sampling
+cost is decoupled from the optimization (warm starts make each extra sample cheap).
 
-To save on computation, we propose estimating the change in congestion through sensitivity.
-For linear cost, congestion (mu) is piecewise constant.
-In practice, the costs have small quadratic terms, leading to piecewise linear mu; but critically, they are still discontinuous, making derivatives useless.
-We aim for a proxy based on barrier methods (such as IPOPT) and assess its usefulness in predicting the actual change in mu.
+The method and empirical results on a 2000-bus synthetic ERCOT network are described in the
+accompanying paper, *Congestion price uncertainty from interconnection queue by Monte Carlo
+sampling*.
 
-## Current focus: sampling the congestion-dual tail
+## What the repository computes
 
-The active line of work estimates the high tail of the congestion target
+The work is one pipeline, run per testbed **case**:
 
 ```
-S(x) = sum_l |mu_l(x)|
+define a case ─▶ solve one build-out ─▶ sweep many build-outs ─▶ estimate the distribution ─▶ draw
+  (cases/)          (model/)              (sweeps/, sampling/)       (sampling/)            (figures/)
 ```
 
-over the discrete space of generator-availability configurations `x` (each generator on/off).
-High-`S` configurations are rare under the nominal law, so we compare rare-event sampling schemes against an **exact ground truth** obtained by enumerating every config and caching its duals.
+A **case** is a network, a queue of candidate projects with their build probabilities, and
+the modeling recipe it is solved under.  Every command takes `--case <name>` and reads
+everything else from the case registry (`src/cases/registry.py`), so the same commands run any
+case.  The cases that reproduce the paper are the ACTIVSg2000 (synthetic ERCOT) build-outs
+`activsg2000_v12_lev3a3` (an enumerable 20-project queue) and `activsg2000_v12_levfull` (the
+full 195-project queue, estimated by MCMC).  Two small IEEE cases, `case14_queue` and
+`case30_queue`, are included as fast runnable examples of the same pipeline.
 
-The nominal law is **general**, not fixed to iid Bernoulli. The iid-Bernoulli law in the current testbeds is a temporary, convenient choice; the methods must handle correlated discrete laws, in particular a **Markov random field (MRF)** form (`sampling/fit_mrf.py` fits pairwise MRF parameters to the dual landscape). Likewise, cross-entropy is one option among several for choosing an importance distribution — its closed-form update only carries an advantage for product/Bernoulli families, so for an MRF or other correlated law we stay **flexible on the importance metric** (variance minimization, exact-mass, tilting, etc.) rather than privileging cross-entropy.
-
-**Pipeline.** `model/` solves one configuration and extracts per-constraint μ; `sweeps/enumerate_configs.py` runs all `2^ngen` configurations and `sweeps/build_target_cache.py` reduces the result to a common per-configuration frame; `sampling/problem.py` defines a `Problem` class that loads that cache and provides `S`, the nominal law, the call-counting `Evaluator`, and the exact exceedance curve `P[S>=b]` used as truth.  The runner (`sampling/run_experiments.py`) constructs the `Problem` for a case named on the command line and passes it into every sampler, so no case is hardcoded in the library.
-
-**Samplers** (all live in `src/sampling/methods/`, each preserved in its own file, compared cumulatively at a matched solver-call budget via `sampling/run_experiments.py`; see `src/sampling/README.md`):
-
-| key | file | sampler |
-|-----|------|---------|
-| `direct` / `subset_sim` | `subset_simulation.py` | direct nominal sampling baseline + subset simulation (Au & Beck) |
-| `ascent_is` | `ascent_importance_sampling.py` | greedy single-flip ascent seeds a defensive IS mixture (currently Bernoulli, an ansatz — not a commitment to a Bernoulli nominal law) |
-| `smc_tilt` | `smc_tilting.py` | SMC along the exponential-tilting path `q ~ p_nom * exp(theta*S)` (no ansatz fit) |
-| `ascent_exact` | `ascent_exact_mass.py` | ascent-IS but exact mass over the explored set + IS on the unexplored remainder |
-
-**Testbeds.** `case14_gen_per_bus` (14 bits, fully enumerated) was the first model but proved too easy — its deep tail has only ~26 configs, so a sampler covering a few percent of the space nearly enumerates it.
-`case30_gen_per_bus` (built by `cases/build_gen_per_bus.py`: IEEE-30 topology, a generator at each of the 20 load buses, `2^20` configs) is the harder replacement: `diagnostics/check_congestion_landscape.py` confirms a genuinely multimodal tail (24/41 lines bind, ~310 distinct binding-line signatures and 21 distinct peak-μ corridors in the high-`S` tail).
-The exhaustive `case30` ground truth is now solved: every one of the `2^20` generator-availability configs has been run through `model/dcopf.py` on Gurobi (1,048,575 viable solutions in `results/case30_gen_per_bus/`; only the all-off config is infeasible).
-The enumerated `S = sum_l |mu_l|` distribution spans `p50 = 220`, `p90 = 474`, `p99 = 1144`, `max = 2040`, with up to 13 lines binding at once.
-
-These two gen-per-bus cases have since been superseded by the five-case incumbent-fleet matrix in `notes/paper_plan.md` §3; they are kept for continuity and not re-run.
-
-> Solver note: Gurobi is licensed and is the solver used for the `case30` enumeration; **HiGHS** (`solver="highs"`) remains available as an open-source fallback that returns the same LP duals.
+`src/README.md` is the full map of the pipeline and the data layout.
 
 ## Setup
 
@@ -65,114 +53,98 @@ Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone <repo>
 cd AMPS
-./setup.sh               # clones EGRET into Egret/ and installs all dependencies
+./setup.sh          # fetches EGRET and installs all dependencies with `uv sync`
 ```
 
-Solvers:
-- **Gurobi** — preferred for unit commitment (MIP) and DCOPF; requires a valid licence
-- **HiGHS** — open-source fallback for LP/DCOPF (`--solver highs`)
-- **Ipopt** — required for AC OPF (not currently used in main scripts)
+Solvers — the models are linear programs, so either works:
 
-## Project layout
+- **Gurobi** (`gurobipy`) — preferred, needs a license (free for academics).
+- **HiGHS** (`highspy`) — open-source fallback; returns the same LP duals.
 
-`src/` is one package per workflow stage; see `src/README.md` for the full map and the case
-registry that ties them together.
+## Running the calculation
 
-```
-src/
-  cases/         define a testbed and screen its N-1 set   ->  data/<case>*.json
-    registry.py    THE case registry: every stage reads case facts from here
-  model/         one configuration -> congestion duals mu  (the recipe lives here)
-  sweeps/        many configurations -> caches             ->  results/<case>/*
-  sampling/      estimate the tail from a sample, score against exact truth
-  descriptors/   try to predict the tail from one solve instead (it fails)
-  figures/       every plot and table; nothing here computes a result
-  sensitivity/   barrier-regularised dmu/dP and dLMP/dP
-  ercot/         empirical ERCOT congestion study (motivation, independent of the pipeline)
-  diagnostics/   one-off probes and audits
-  utils/         low-level helpers
-  _archive/      superseded code, kept readable, imported by nothing
-Egret/           read-only EGRET reference (runtime EGRET pinned in pyproject.toml)
-data/            network JSON cases, queue files, and fetched ERCOT datasets
-results/         output caches and figures, one directory per case
-notes/           research notes and the paper plan
-scripts/         cluster job scripts
-```
+### A small example, end to end (runs on a laptop)
 
-## Typical workflow
-
-Every entry point takes `--case <name>` and reads its paths, queue, and modeling recipe from
-`cases.registry`, so the same commands run any of the eight testbeds.
+`case14_queue` enumerates all `2^14` build-outs in well under a minute:
 
 ```bash
-# build a testbed and screen its contingency set
-uv run python -m src.cases.build_ieee_queue     --case case30_queue
-uv run python -m src.cases.calibrate_ratings    --case case30_queue
-uv run python -m src.cases.screen_contingencies --case case30_queue
-
-# exhaustive ground truth, then the common caches every consumer reads
-uv run python -m src.sweeps.enumerate_configs   --case case30_queue --workers 16
-uv run python -m src.sweeps.build_target_cache  --case case30_queue
-uv run python -m src.sweeps.build_dual_cache    --case case30_queue
-
-# estimate, describe, draw
-uv run python -m src.sampling.run_experiments        --case case30_queue
-uv run python -m src.figures.mu_distributions.per_line_survivor  --case case30_queue
-uv run python -m src.figures.descriptors
+uv run python -m src.sampling.build_laws        --case case14_queue        # the four build-probability models
+uv run python -m src.sweeps.enumerate_configs   --case case14_queue        # ground-truth duals
+uv run python -m src.sweeps.build_target_cache  --case case14_queue        # per-config summary
+uv run python -m src.sweeps.build_dual_cache    --case case14_queue        # per-line |μ| table
+uv run python -m src.sampling.run_experiments   --case case14_queue        # direct Monte Carlo
+uv run python -m src.figures.mu_distributions.line_mean_error --case case14_queue --transpose
 ```
 
-The sensitivity thread runs separately:
+Each stage writes to `results/<case>/` and the next stage reads it; `src/cases/README.md` and
+`src/sampling/README.md` describe the caches.  `case30_queue` runs the same way (its `2^20`
+enumeration takes a couple of hours on ~16 workers).
+
+### Reproducing the paper — enumerable case (`activsg2000_v12_lev3a3`)
+
+This is a 2000-bus case swept over eight load snapshots, so the enumeration is large and is
+meant for a cluster (`src/sweeps/submit_cluster.py` and `src/sweeps/vacc.slurm` run it as a
+SLURM job chain; see `src/README.md`).  The stages are the same:
 
 ```bash
-uv run python -m src.sensitivity.barrier --dir case14_gen_per_bus        # barrier dmu/dP, dLMP/dP
-uv run python -m src.sensitivity.finite_difference                       # finite-difference cross-check
-uv run python -m src.figures.sensitivity.sensitivity results/sensitivity_barrier_<case>.json
+uv run python -m src.cases.prepare_case        --case activsg2000_v12_lev3a3   # relief set + screened contingencies
+uv run python -m src.sweeps.enumerate_configs  --case activsg2000_v12_lev3a3 --screened
+uv run python -m src.sweeps.build_target_cache --case activsg2000_v12_lev3a3
+uv run python -m src.sweeps.build_dual_cache   --case activsg2000_v12_lev3a3
+uv run python -m src.sampling.run_experiments  --case activsg2000_v12_lev3a3
+
+# paper figures
+uv run python -m src.figures.mu_distributions.top_config_mu                   --case activsg2000_v12_lev3a3
+uv run python -m src.figures.mu_distributions.top_config_estimate            --case activsg2000_v12_lev3a3 --transpose
+uv run python -m src.figures.mu_distributions.line_mean_error                --case activsg2000_v12_lev3a3 --transpose
+uv run python -m src.figures.mu_distributions.line_exceed_error              --case activsg2000_v12_lev3a3 --transpose
+uv run python -m src.figures.mu_distributions.mu_distribution_difference     --case activsg2000_v12_lev3a3
+uv run python -m src.figures.mu_distributions.direct_distribution_difference --case activsg2000_v12_lev3a3
 ```
 
-## Methods
+The queue and the four build probability models (`bernoulli` and the correlated `mrf_a`,
+`mrf_cobuild`, `mrf_substitute`) are committed under `data/activsg2000_v12_lev3a3/`.
 
-### Barrier-regularised sensitivity (`sensitivity/barrier.py`)
+### Reproducing the paper — full-queue case (`activsg2000_v12_levfull`)
 
-Works for any cost structure (LP or QP).  Replaces the singular bordered-Hessian of the LP case with a regularised saddle-point system:
+The 195-project queue has `2^195` build-outs, too many to enumerate, so its distribution is
+estimated by drawing configurations with MCMC and solving each (`src/sampling/mcmc_sweep.py`).
+This is a multi-day cluster run per probability model:
+
+```bash
+uv run python -m src.cases.prepare_case  --case activsg2000_v12_levfull
+uv run python -m src.sampling.mcmc_sweep --case activsg2000_v12_levfull --law bernoulli --screened
+uv run python -m src.sampling.consolidate_mcmc_duals --case activsg2000_v12_levfull --law bernoulli --rounds 200
+uv run python -m src.sampling.solve_modal_config     --case activsg2000_v12_levfull --law bernoulli
+
+uv run python -m src.figures.mu_distributions.line_sample_distribution --case activsg2000_v12_levfull --law bernoulli
+uv run python -m src.figures.mu_distributions.line_sample_error        --case activsg2000_v12_levfull --law bernoulli
+```
+
+Repeat the `mcmc_sweep`/`consolidate`/figure steps for `--law mrf_cobuild` and
+`--law mrf_substitute` to compare build probability models.
+
+## Repository layout
 
 ```
-[ H + Y + D_w    J^T ] [ dx/dP ]   [ 0  ]
-[ J             -D_c ] [ dν/dP ] = [ e_j]
+src/            the pipeline, one package per stage (see src/README.md)
+data/           committed case inputs: the network, load snapshots, queues, and build models
+results/        output caches and figures, one directory per case (regenerated, not tracked)
+notes/          research notes
+Egret/          local EGRET reference, fetched by setup.sh (not tracked)
 ```
 
-`Y` is built from all inequality constraints using barrier weights `y_k = (z_k + ε) / (s_k + ε)` evaluated at the optimum.  Congestion dual sensitivities are recovered from the differentiated complementarity condition.
+`results/` is derived from `data/` and is not committed; the commands above regenerate it.
 
-See `docs/narrative/kkt_sensitivity.rst` for the full derivation.
+## A note on the branches
 
-### KKT / bordered-Hessian
-
-For QP costs (quadratic generator cost curves) only.  Differentiates the KKT stationarity conditions directly; no re-solving required.  Returns zero and exits early for LP problems.
-
-### Finite-difference (`sensitivity/finite_difference.py`)
-
-Re-solves DCOPF with a small load perturbation at each bus.  Slow but assumption-free; used to validate the analytical methods.
+`main` carries only what reproduces the paper.  The full research project — the rare-event
+importance samplers, the barrier-sensitivity thread, the empirical ERCOT congestion study, the
+one-time ACTIVSg2000 construction from ERCOT and MATPOWER sources, and the other testbeds —
+lives on the `archive` branch.
 
 ## EGRET
 
-[EGRET](https://github.com/grid-parity-exchange/Egret) is a Pyomo-based library for grid optimisation.  It is installed as a local editable package from `Egret/`.  Changes to files under `Egret/egret/` take effect immediately without reinstalling.
-
-Key classes and functions:
-- `egret.data.model_data.ModelData` — central data structure for network topology and results
-- `egret.models.dcopf.solve_dcopf` — DC optimal power flow
-- `egret.models.unit_commitment.solve_unit_commitment` — security-constrained unit commitment
-
-## Notes on LMPs and unit commitment
-
-`solve_unit_commitment` solves a MIP; MIP solvers do not produce meaningful dual variables, so **LMPs are not available in a standard UC solution**.  LMPs require either:
-- solving the LP relaxation (`relaxed=True`), or
-- fixing commitment decisions and re-solving as DCOPF.
-
-The sensitivity scripts use LMP differences across buses as proxies for congestion dual values when constructing barrier weights.  If LMPs are absent (as in a UC result file), the barrier weights fall back to the smoothing parameter `eps`.
-
-## Docs
-
-```bash
-cd docs
-make html
-# open _build/html/index.html
-```
+[EGRET](https://github.com/grid-parity-exchange/Egret) is a Pyomo-based grid-optimization
+library; the security-constrained DCOPF is built on it.  `setup.sh` fetches it, and `uv`
+installs it as a dependency.
