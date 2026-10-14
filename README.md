@@ -124,6 +124,23 @@ uv run python -m src.figures.mu_distributions.line_sample_error        --case ac
 Repeat the `mcmc_sweep`/`consolidate`/figure steps for `--law mrf_cobuild` and
 `--law mrf_substitute` to compare build probability models.
 
+### Rebuilding the ACTIVSg2000 inputs from source (optional)
+
+The ACTIVSg2000 inputs ship committed under `data/`, so this is only needed to regenerate them
+with `src/cases/texas/` (see that README for the full command sequence).  Three external sources
+are involved:
+
+- **ACTIVSg2000 model** — download the case from
+  [Texas A&M](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/) into
+  `texas_model/ACTIVSg2000/`; `convert_model` turns it into `data/activsg2000.json`.
+- **ERCOT Public API** (for the load and renewable snapshots) — register for an ERCOT Public API
+  account to get a username and subscription key, set them as `ERCOT_API_USERNAME` and
+  `ERCOT_PUBLIC_API_SUBSCRIPTION_KEY`, then run `uv run python -m src.ercot.ercot_auth` to
+  exchange your password for a ~1-hour token (cached to `~/.ercot_token.json`); the `fetch_*`
+  steps read it.
+- **ERCOT CDR report** — download the Capacity, Demand and Reserves workbook into
+  `data/ercot_cdr/` for the per-fuel capacity factors.
+
 ## Repository layout
 
 ```
