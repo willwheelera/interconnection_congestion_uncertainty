@@ -1,4 +1,4 @@
-# AMPS — Congestion price uncertainty from the interconnection queue
+# Electricity Market Congestion Price Analysis
 
 This repository estimates how uncertain generation-interconnection outcomes move wholesale
 **congestion prices**, by Monte Carlo sampling.
