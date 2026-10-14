@@ -1,4 +1,4 @@
-"""Reduce the first N rounds of an MCMC sweep to one per-sample mu cache.
+"""Reduce the first N rounds of an MCMC sweep to one per-sample mu table.
 
 `sampling.mcmc_sweep` writes per-round part files under results/<case>/mcmc/<law>/
 (duals/, snapmax/, configs/), each round holding `chains` solved configurations.  A
@@ -67,7 +67,7 @@ def consolidate(case, law, rounds):
     driver = out.loc[out["max_mu"].idxmax(), "driver"]
     meta = dict(case=case.name, law=law, rounds=rounds,
                 chains=int(out["chain"].max()) + 1, nsamples=len(out), driver=driver)
-    dest = mcmc_dir / "target_cache.parquet"
+    dest = mcmc_dir / "target_samples.parquet"
     write_parquet_meta(out, meta, dest)
     print(f"{case.name}/{law}  rounds={rounds}  samples={len(out)}  "
           f"driver={driver}  -> {dest}")

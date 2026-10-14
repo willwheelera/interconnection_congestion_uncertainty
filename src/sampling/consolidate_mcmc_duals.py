@@ -1,4 +1,4 @@
-"""Scatter the first N rounds of an MCMC sweep into a wide per-line dual cache.
+"""Scatter the first N rounds of an MCMC sweep into a wide per-line dual-sample table.
 
 The per-line tail figures read a dense per-line |mu| table -- a dual_cache.parquet whose
 "mu" columns are the lines, built for the enumerated cases by sweeps.build_dual_cache.  A
@@ -63,7 +63,7 @@ def build(case, law, rounds, top, threshold):
     df = wide_dual_cache(fill_table(parts, selected, chains), selected)
     meta = dict(case=case.name, law=law, rounds=rounds, chains=chains,
                 nsamples=len(df), lines=list(map(str, selected)))
-    dest = case.results_dir / "mcmc" / law / "dual_cache.parquet"
+    dest = case.results_dir / "mcmc" / law / "dual_samples.parquet"
     write_parquet_meta(df, meta, dest)
     print(f"{case.name}/{law}  lines={len(selected)}  samples={len(df)}  -> {dest}")
     print("  " + ", ".join(f"{c}={cmax[c]:.0f}" for c in selected))
