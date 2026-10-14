@@ -129,19 +129,15 @@ Repeat the `mcmc_sweep`/`consolidate`/figure steps for `--law mrf_cobuild` and
 ```
 src/            the pipeline, one package per stage (see src/README.md)
 data/           committed case inputs: the network, load snapshots, queues, and build models
+texas_model/    ERCOT interconnection-queue data the ACTIVSg2000 construction reads
 results/        output caches and figures, one directory per case (regenerated, not tracked)
 notes/          research notes
 Egret/          local EGRET reference, fetched by setup.sh (not tracked)
 ```
 
-`results/` is derived from `data/` and is not committed; the commands above regenerate it.
-
-## A note on the branches
-
-`main` carries only what reproduces the paper.  The full research project — the rare-event
-importance samplers, the barrier-sensitivity thread, the empirical ERCOT congestion study, the
-one-time ACTIVSg2000 construction from ERCOT and MATPOWER sources, and the other testbeds —
-lives on the `archive` branch.
+`results/` is derived from `data/` and is not committed; the commands above regenerate it.  The
+raw ACTIVSg2000 model and ERCOT workbooks that `src/cases/texas/` reads are bulk downloads and
+are not tracked either; the committed `data/activsg2000*` files are their processed outputs.
 
 ## EGRET
 

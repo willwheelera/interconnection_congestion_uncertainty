@@ -19,6 +19,7 @@ one stage should not pay for the others.
 
 __all__ = [
     "cases",
+    "ercot",
     "figures",
     "model",
     "paths",

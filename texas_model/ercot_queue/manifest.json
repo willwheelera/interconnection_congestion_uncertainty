@@ -1,0 +1,214 @@
+{
+  "generated_at": "2026-06-05",
+  "site": "https://www.ercotqueue.com",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "creator": {
+    "name": "Matt Prusak",
+    "url": "https://www.ercotqueue.com/about"
+  },
+  "docs": "https://www.ercotqueue.com/api-docs",
+  "endpoints": [
+    {
+      "path": "/data/attrition_rates.json",
+      "name": "Historical attrition by funnel stage",
+      "description": "Commissioned vs dropped vs in-progress percentages per stage and per fuel",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 4128
+    },
+    {
+      "path": "/data/calibration.json",
+      "name": "Frozen hold-out backtest of the build chance model",
+      "description": "AUC, Brier, log loss, MACE, decile calibration, by-stage and by-fuel breakdowns",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 3751
+    },
+    {
+      "path": "/data/calibration_history.json",
+      "name": "Rolling backtest across semi-annual cutoffs",
+      "description": "AUC, MACE, sample size at each cutoff from Jun 2021 forward",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 2902
+    },
+    {
+      "path": "/data/cod_history.json",
+      "name": "Slim COD slip history per project",
+      "description": "Every projected_cod shift across the historical report set, filtered to cod-only fields",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 842361
+    },
+    {
+      "path": "/data/cod_slippage_summary.json",
+      "name": "Aggregate COD slip statistics",
+      "description": "Median and tail slip months, by fuel and by stage",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 8085
+    },
+    {
+      "path": "/data/developer_changes.json",
+      "name": "Month-over-month developer field changes",
+      "description": "Audit log of every developer-name field change in the GIS report",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 281072
+    },
+    {
+      "path": "/data/developer_scorecards.json",
+      "name": "Developer track records since 2018",
+      "description": "2,085 developers with completion rate, projects shipped, dropped, fuel mix, capacity GW",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 728945
+    },
+    {
+      "path": "/data/ercot_load_forecast.json",
+      "name": "ERCOT long-term load forecast vintages",
+      "description": "Multi-vintage LTLF series for the demand side",
+      "refresh": "annual",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 2233
+    },
+    {
+      "path": "/data/historical_trends.json",
+      "name": "Multi-year trend series",
+      "description": "Long-term capacity-by-fuel and stage-distribution trends",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 28544
+    },
+    {
+      "path": "/data/monthly_aggregates.json",
+      "name": "Monthly queue totals",
+      "description": "Total project count and capacity GW per month since 2018",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 83922
+    },
+    {
+      "path": "/data/probability_model_spec.csv",
+      "name": "Full factor lookup spec for the build chance model",
+      "description": "Stage base rates, fuel rates, dev tier cutoffs, velocity medians, slippage thresholds, FIS-progress rates, capacity medians",
+      "refresh": "monthly",
+      "format": "csv",
+      "license": "CC-BY-4.0",
+      "bytes": 9670
+    },
+    {
+      "path": "/data/projects.json",
+      "name": "Live ERCOT generation interconnection queue",
+      "description": "1,802 projects with milestones, calibrated build chance, factor breakdown, and bootstrap CIs",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 2883265,
+      "schema": [
+        "generated_at",
+        "source_file",
+        "projects[].inr",
+        "projects[].completion_probability_calibrated"
+      ]
+    },
+    {
+      "path": "/data/recalibration.json",
+      "name": "Isotonic recalibration map (PAV) with LOOCV",
+      "description": "Pooled-cutoff fit + leave-one-cutoff-out validation; in-sample and out-of-sample MACE",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 7580
+    },
+    {
+      "path": "/data/stage_velocity.json",
+      "name": "Stage-transition durations",
+      "description": "Median months for each ERCOT funnel transition, overall and by fuel",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 12623
+    },
+    {
+      "path": "/data/supply_scenarios.json",
+      "name": "Probability-weighted supply scenarios",
+      "description": "GW expected to commission under different build-chance assumptions",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 2001
+    },
+    {
+      "path": "/data/whats_new.json",
+      "name": "Month-over-month diff of the GIS report",
+      "description": "Newly commissioned, construction-started, IA-signed, dropped, and new entries between latest two reports",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 44671,
+      "schema": [
+        "from_month",
+        "to_month",
+        "events[].event_type",
+        "events[].inr"
+      ]
+    },
+    {
+      "path": "/data/site_freshness.json",
+      "name": "Canonical site freshness and public-data inventory",
+      "description": "Canonical site month, source report month, generation queue totals, chartbook refresh, large-load basis, and endpoint inventory",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 4933,
+      "schema": [
+        "site_update_display",
+        "source_report_display",
+        "generation_queue",
+        "public_data"
+      ]
+    },
+    {
+      "path": "/data/projects.csv",
+      "name": "Live ERCOT generation interconnection queue as CSV",
+      "description": "Flat CSV extract of the current project queue with status, capacity, COD, stage, and calibrated build chance",
+      "refresh": "monthly",
+      "format": "csv",
+      "license": "CC-BY-4.0",
+      "bytes": 253973,
+      "schema": [
+        "inr",
+        "name",
+        "developer",
+        "capacity_mw",
+        "completion_probability_calibrated"
+      ]
+    },
+    {
+      "path": "/data/manifest.json",
+      "name": "Machine-readable public data manifest",
+      "description": "Endpoint inventory with paths, descriptions, refresh cadence, formats, byte sizes, and schema summaries",
+      "refresh": "monthly",
+      "format": "json",
+      "license": "CC-BY-4.0",
+      "bytes": 7095,
+      "schema": [
+        "generated_at",
+        "endpoints[].path",
+        "endpoints[].format",
+        "endpoints[].bytes"
+      ]
+    }
+  ]
+}

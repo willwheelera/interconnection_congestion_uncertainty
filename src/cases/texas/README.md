@@ -1,36 +1,64 @@
-# cases/texas — ACTIVSg2000 relief selection
+# cases/texas — building the ACTIVSg2000 testbeds from source
 
-The ACTIVSg2000 (synthetic ERCOT) cases are built from the shared network
-`data/activsg2000.json`, the load snapshots `data/activsg2000_load_collection.json`, and each
-case's own leveraged queue `data/<case>/queue.json` — all committed.  On this branch, the only
-construction step that still runs as part of preparing a case is choosing the slim relief set:
-
-| file | role |
-|---|---|
-| `select_relief_set.py` | Collect the buses that ever shed load under full ORDC relief, validate that restricting relief to that set reproduces the target `S` on held-out configurations, and write `data/<case>/relief_set.json`.  Called by `cases.prepare_case`. |
+One-time construction of the ACTIVSg2000 (synthetic ERCOT) inputs that `cases.registry` points
+at: the network, the load/renewable snapshots, and the leveraged queues.  Their outputs are the
+committed `data/activsg2000*` and `data/activsg2000_v12_*/queue.json` files, so rerun these only
+to rebuild an input.  The raw sources they read — the ACTIVSg2000 MATPOWER/PowerWorld model and
+the ERCOT CDR workbook — are bulk downloads and are not tracked; the two `fetch_*` steps also
+need an ERCOT API token (`ercot_auth.py`).
 
 The synthetic ACTIVSg2000 grid is 2000 buses, 3206 branches, and 544 base generators.  A
 *configuration* is a bit vector over ERCOT interconnection-queue candidates (20 for the
-`lev*a3` cases, 195 for `levfull`), each either built or not.
+`lev*a3` cases, 195 for `levfull`), each either built or not.  The shipped cases are built on the
+base `activsg2000.json` fleet; only the queue on top differs.
 
-## Why a slim relief set
+## Files
 
-A full relief generator at every load bus enlarges the LP about 5x — an inactive relief
-column is still factorized on every warm re-solve — while only a handful of ACTIVSg2000's load
-buses ever shed.  The relief set is a sweep **input**: it lives in `data/<case>/relief_set.json`
-and `Case.relief_buses()` falls back to every load bus until one is selected.  The recipe it
-supports (emergency factor, ORDC-shaped nodal relief, shadow-price cap) is documented in
-`src/model/README.md`.
+| file | role |
+|---|---|
+| `convert_model.py` | MATPOWER + PowerWorld `.aux` → EGRET JSON with coordinates, ERCOT weather zones, emergency ratings, and the N-1 contingency set.  **This is the loader that turns the downloaded ACTIVSg2000 model into the `data/activsg2000.json` the registry uses.** |
+| `compile_resource_additions.py` | Read the ERCOT CDR unit-detail tables (fuel groups and capacity factors used by the renewable step). |
+| `fetch_load_snapshots.py` | Pull ERCOT actual zonal load for a set of high-congestion hours (needs an ERCOT token). |
+| `build_load_snapshots.py` | Turn those into per-zone load scale factors → `data/activsg2000_load_collection.json`. |
+| `fetch_renewable_snapshots.py` | Pull ERCOT actual wind and solar output for the same hours (needs an ERCOT token). |
+| `build_renewable_availability.py` | Attach a per-fuel capacity factor to each snapshot in the collection. |
+| `build_queue_distribution.py` | Select ERCOT queue projects, match them to buses geographically, set each candidate's build probability → a base queue. |
+| `screen_bus_leverage.py` | Rank buses by how much power they can push onto the constraints that price congestion (a PTDF/shift-factor screen through `model.scdcopf`). |
+| `build_leveraged_queue.py` | Draw a queue restricted to high-leverage sites → `data/<case>/queue.json` for the `lev*` cases. |
+| `select_relief_set.py` | Collect the buses that ever shed under full ORDC relief, validate the slim set reproduces the target `S` on held-out configurations → `data/<case>/relief_set.json`.  Called by `cases.prepare_case`. |
+
+## Pipeline
 
 ```bash
-uv run python -m src.cases.prepare_case --case activsg2000_v12_lev3a3   # runs select_relief_set, then screening
+# network
+uv run python -m src.cases.texas.convert_model              # ACTIVSg2000 model -> data/activsg2000.json
+
+# load and renewable snapshots (needs an ERCOT token; see src/ercot/ercot_auth.py)
+uv run python -m src.cases.texas.fetch_load_snapshots
+uv run python -m src.cases.texas.build_load_snapshots       # -> data/activsg2000_load_collection.json
+uv run python -m src.cases.texas.fetch_renewable_snapshots
+uv run python -m src.cases.texas.build_renewable_availability
+
+# queue: a leveraged draw at the high-shift-factor buses
+uv run python -m src.cases.texas.build_queue_distribution
+uv run python -m src.cases.texas.screen_bus_leverage  --case activsg2000_v12_lev3a3
+uv run python -m src.cases.texas.build_leveraged_queue --case activsg2000_v12_lev3a3
+
+# relief set + screened contingencies, at the recipe the sweep solves
+uv run python -m src.cases.prepare_case               --case activsg2000_v12_lev3a3
 ```
 
-## The full construction, on `archive`
+Then `sweeps.enumerate_configs` (or `sampling.mcmc_sweep` for `levfull`) for the distribution;
+see `src/README.md`.
 
-Building the ACTIVSg2000 cases from source — the MATPOWER/PowerWorld network conversion, the
-ERCOT CDR fleet additions, the ERCOT load and renewable snapshot pulls, and the leveraged-queue
-construction — is a one-time process whose committed outputs are the `data/activsg2000*` files
-the registry points at.  Those construction scripts (`convert_model`, `add_cdr_resources`,
-`fetch_*`, `build_leveraged_queue`, `screen_bus_leverage`, …) live on the `archive` branch;
-they are not needed to reproduce the paper from the committed inputs.
+## Notes
+
+**Candidate cost comes from fuel.** The ERCOT queue file records a project's fuel rather than a
+marginal cost, so `cases.registry.FUEL_COST` maps fuel → $/MWh when normalizing candidates.
+Renewables and storage discharge are zero-cost; thermal costs sit above the existing fleet so
+new thermal runs only when cheaper units are exhausted.
+
+**Leverage-first queue construction.** `screen_bus_leverage` ranks buses by their shift-factor
+leverage on the priced constraints, and `build_leveraged_queue` draws real ERCOT projects only
+at those buses — the siting that produces a queue whose build-out actually moves congestion.
+The slim relief set and the recipe it supports are documented in `src/model/README.md`.

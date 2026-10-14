@@ -1,0 +1,177 @@
+{
+  "generated_at": "2026-06-05T15:14:07-05:00",
+  "cutoff": "2024-02",
+  "latest_report_month": "2026-05",
+  "evaluation_window_months": 27,
+  "scope_caveat": "Backtest covers queue entry \u2192 COD only. Pre-queue risk (land control, PPAs, environmental permitting) is not modeled.",
+  "training_coefficients": {
+    "stage_base_rates": {
+      "overall": {
+        "1_no_ia": 9.9,
+        "2_ia_fis_pending": 32.6,
+        "3_ia_fis_complete": 81.7,
+        "4_construction": 100.0
+      },
+      "by_cohort": {
+        "pre_2020": {
+          "n": 420,
+          "1_no_ia": 11.7,
+          "1_no_ia_n": 196,
+          "2_ia_fis_pending": 34.1,
+          "2_ia_fis_pending_n": 44,
+          "3_ia_fis_complete": 78.9,
+          "3_ia_fis_complete_n": 166
+        },
+        "2020_2022": {
+          "n": 140,
+          "1_no_ia": 6.5,
+          "1_no_ia_n": 77,
+          "3_ia_fis_complete": 88.5,
+          "3_ia_fis_complete_n": 61
+        },
+        "2023_plus": {
+          "n": 6
+        }
+      }
+    },
+    "n_resolved_developers": 362,
+    "n_velocity_transitions": 4
+  },
+  "summary": {
+    "n": 552,
+    "n_commissioned": 188,
+    "n_dropped": 364,
+    "predicted_avg_pct": 22.6,
+    "actual_rate_pct": 34.1,
+    "mean_abs_calibration_error_pp": 12.07,
+    "brier_score": 0.1255,
+    "log_loss": 0.4206,
+    "auc": 0.913
+  },
+  "by_decile": [
+    {
+      "decile": 1,
+      "n": 55,
+      "predicted_min": 1.0,
+      "predicted_max": 1.0,
+      "predicted_avg": 1.0,
+      "actual_rate": 0.0
+    },
+    {
+      "decile": 2,
+      "n": 55,
+      "predicted_min": 1.0,
+      "predicted_max": 1.0,
+      "predicted_avg": 1.0,
+      "actual_rate": 0.0
+    },
+    {
+      "decile": 3,
+      "n": 55,
+      "predicted_min": 1.0,
+      "predicted_max": 1.0,
+      "predicted_avg": 1.0,
+      "actual_rate": 0.0
+    },
+    {
+      "decile": 4,
+      "n": 55,
+      "predicted_min": 1.0,
+      "predicted_max": 2.0,
+      "predicted_avg": 1.5,
+      "actual_rate": 18.2
+    },
+    {
+      "decile": 5,
+      "n": 56,
+      "predicted_min": 2.0,
+      "predicted_max": 5.0,
+      "predicted_avg": 3.6,
+      "actual_rate": 12.5
+    },
+    {
+      "decile": 6,
+      "n": 55,
+      "predicted_min": 5.0,
+      "predicted_max": 11.0,
+      "predicted_avg": 7.2,
+      "actual_rate": 16.4
+    },
+    {
+      "decile": 7,
+      "n": 55,
+      "predicted_min": 11.0,
+      "predicted_max": 23.0,
+      "predicted_avg": 16.8,
+      "actual_rate": 30.9
+    },
+    {
+      "decile": 8,
+      "n": 55,
+      "predicted_min": 25.0,
+      "predicted_max": 60.0,
+      "predicted_avg": 36.9,
+      "actual_rate": 81.8
+    },
+    {
+      "decile": 9,
+      "n": 55,
+      "predicted_min": 64.0,
+      "predicted_max": 77.0,
+      "predicted_avg": 72.2,
+      "actual_rate": 89.1
+    },
+    {
+      "decile": 10,
+      "n": 56,
+      "predicted_min": 77.0,
+      "predicted_max": 99.0,
+      "predicted_avg": 84.1,
+      "actual_rate": 91.1
+    }
+  ],
+  "by_stage": {
+    "2_ia_fis_pending": {
+      "n": 61,
+      "predicted_avg": 30.1,
+      "actual_rate": 77.0
+    },
+    "3_ia_fis_complete": {
+      "n": 116,
+      "predicted_avg": 76.4,
+      "actual_rate": 89.7
+    },
+    "4_construction": {
+      "n": 3,
+      "predicted_avg": 96.0,
+      "actual_rate": 66.7
+    },
+    "1_no_ia": {
+      "n": 372,
+      "predicted_avg": 4.0,
+      "actual_rate": 9.4
+    }
+  },
+  "by_fuel": {
+    "Wind": {
+      "n": 35,
+      "predicted_avg": 24.4,
+      "actual_rate": 42.9
+    },
+    "Solar": {
+      "n": 209,
+      "predicted_avg": 23.9,
+      "actual_rate": 34.0
+    },
+    "Battery": {
+      "n": 284,
+      "predicted_avg": 20.4,
+      "actual_rate": 31.7
+    },
+    "Gas": {
+      "n": 22,
+      "predicted_avg": 38.8,
+      "actual_rate": 54.5
+    }
+  }
+}

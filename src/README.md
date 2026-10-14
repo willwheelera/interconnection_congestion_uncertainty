@@ -48,8 +48,8 @@ The cases shipped on this branch:
 The paper's results come from `activsg2000_v12_lev3a3` (the enumerable leveraged-queue
 build-out) and `activsg2000_v12_levfull` (the full 195-candidate queue).  The `lev*a3` cases
 are five independent leveraged draws on the same 2000-bus network, fleet, and snapshots; the
-two IEEE cases are small, fast examples of the identical pipeline.  The registry lists more
-cases than are shipped here — the empirical and legacy testbeds live on the `archive` branch.
+two IEEE cases are small, fast examples of the identical pipeline.  The registry lists a few
+more cases than ship with committed inputs; those are not included here.
 
 ## Running a case end to end
 
@@ -163,8 +163,9 @@ draws) is derived and rebuildable from it.
 
 - **`cases/`** — `registry.py`, the IEEE-queue builder (`build_ieee_queue` +
   `calibrate_ratings`), the generic contingency screener, and `prepare_case` (relief set +
-  screening).  `cases/texas/select_relief_set` chooses the slim ORDC relief set for the
-  ACTIVSg2000 cases; the one-time ACTIVSg2000 construction from source lives on `archive`.
+  screening).  `cases/texas/` is the one-time construction of the ACTIVSg2000 cases from the
+  downloaded model and ERCOT sources (network, snapshots, leveraged queues), plus the relief-set
+  selector `prepare_case` uses; see its README.
 - **`model/`** — the only place the physical model lives.  `scdcopf.build_persistent` builds
   the model once with every candidate present and `PersistentModel.solve` applies a
   configuration by toggling bounds and warm re-solving, which is what makes `2^20` affordable.
@@ -179,6 +180,8 @@ draws) is derived and rebuildable from it.
   `consolidate_*`/`solve_modal_config` reducers handle the unenumerable full queue.  See
   `sampling/README.md` for the build-probability models and the figure list.
 - **`figures/`** — nothing here computes a result; each module reads a cache and renders it.
+- **`ercot/`** — a small ERCOT public-API client (`ercot_auth`, `fetch_ercot`, `data_paths`)
+  that the `cases/texas` snapshot fetchers use to pull real ERCOT load and renewable output.
 
 ## Reproducibility note
 
