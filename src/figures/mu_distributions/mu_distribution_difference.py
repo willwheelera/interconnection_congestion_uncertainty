@@ -36,7 +36,7 @@ from src.cases.registry import get_case
 from src.sampling.problem import case_tag, create_problem
 from src.sampling.distributions import DIST_LABEL
 from src.figures.style import COLORS, DIST_COLOR
-from src.figures.mu_distributions._line_stats import mean_abs_mu, select_lines
+from src.figures.mu_distributions._line_stats import mean_abs_mu, select_lines, line_label
 from src.figures.mu_distributions._panel_layout import FIG_W, FONT, one_sigfig_yaxis, fraction_grid, panel_title
 
 
@@ -49,8 +49,8 @@ def line_column(top, bot, v, weights, baseline, mrfs, colors, name, floor, bins)
     """Fill one line's column: Bernoulli mass on top, each MRF's difference below.
 
     The dashed mean line is the unconditional exact E[|mu_l|] (mean_abs_mu), the same
-    per-line mean used to rank lines and drawn in top_config_mu; the histogram omits the
-    uncongested mass at 0, so on a rarely-congested line the mean sits left of the bars."""
+    per-line mean used to rank lines and drawn in top_config_mu; binning from zero puts the
+    uncongested mass in the first bar, so each column integrates to one."""
     edges = np.linspace(floor, float(v.max()), bins + 1)
     base = bin_mass(v, weights[baseline], edges)
     top.stairs(base, edges, fill=True, color=DIST_COLOR["bernoulli"], alpha=0.55, lw=0)
@@ -77,8 +77,7 @@ def grid_legend(baseline, mrfs, colors):
 def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins, n_lines, case_dir):
     """One two-row figure: Bernoulli shape on top, MRF-minus-baseline difference below."""
     idx, names = select_lines(mu, line_names, weights[baseline], n=n_lines)
-    names = "ABCDE"
-    shown = list(zip(idx, names))
+    shown = list(zip(idx, [line_label(n) for n in names]))
     print(f"showing {len(shown)} lines")
     colors = {m: DIST_COLOR[m] for m in mrfs}
     fig, axs, figh = fraction_grid(1, len(shown), foot=0.2,
@@ -96,7 +95,7 @@ def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins,
     #axs[0, 0].set_ylabel(f"{DIST_LABEL[baseline]}\nprob. mass", fontsize=FONT["axlabel"])
     #axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
 
-    y_range = 0.6
+    y_range = 0.7
     axs[0, 0].set_ylim([0, y_range])
     #m = axs[1, 0].get_ylim()[0]
     #axs[1, 0].set_ylim([m, m+y_range])
@@ -113,7 +112,7 @@ def plot_differences(case, mu, line_names, baseline, mrfs, weights, floor, bins,
     return fig
 
 
-def run(case, baseline, mrfs, bins=30, n_lines=15, mu_floor=1e-2):
+def run(case, baseline, mrfs, bins=30, n_lines=15, mu_floor=0.0):
     """One difference figure for a case; the |mu| table is shared, only the law weights change."""
     c = get_case(case)
     base = create_problem(c, baseline)
@@ -132,8 +131,8 @@ def main():
     parser.add_argument("--mrfs", default="mrf_a,mrf_cobuild,mrf_substitute")
     parser.add_argument("--bins", type=int, default=20)
     parser.add_argument("--n-lines", type=int, default=5)
-    parser.add_argument("--mu-floor", type=float, default=1e-2,
-                        help="treat |mu| below this as uncongested (near-binding dust)")
+    parser.add_argument("--mu-floor", type=float, default=0.0,
+                        help="lower bin edge; 0 includes the uncongested mass in the first bar")
     args = parser.parse_args()
 
     run(args.case, args.baseline, args.mrfs.split(","), args.bins, args.n_lines, args.mu_floor)

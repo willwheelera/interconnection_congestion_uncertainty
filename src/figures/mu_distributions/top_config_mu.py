@@ -119,7 +119,7 @@ def plot_top_configs(case, problems, mu, line_names, dists, threshold, n_lines, 
     fig.legend(handles=config_legend(dists), loc="center left",
                bbox_to_anchor=(1 - 0.14, 0.55), ncol=1, frameon=True,
                fontsize=FONT["legend"], handlelength=1.2, handletextpad=0.4, borderpad=0.3)
-    fig.supxlabel("configuration, most probable first", y=0.04 / figh, fontsize=FONT["axlabel"])
+    fig.supxlabel("Configuration, most probable first", y=0.04 / figh, fontsize=FONT["axlabel"])
     axs[0, 0].set_ylabel(r"$|\mu_l|$", fontsize=FONT["axlabel"])
 
     out = case_dir / f"top_config_mu_{case_tag(case)}.pdf"

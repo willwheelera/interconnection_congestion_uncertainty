@@ -36,7 +36,7 @@ from matplotlib.ticker import MaxNLocator
 
 from src.sampling.problem import case_tag, create_problem
 from src.sampling.distributions import DIST_LABEL, DIST_NAMES
-from src.figures.mu_distributions._line_stats import select_lines
+from src.figures.mu_distributions._line_stats import select_lines, line_label
 from src.figures.mu_distributions._panel_layout import FIG_W, FONT, fraction_grid, one_sigfig_yaxis, panel_title
 from src.figures.mu_distributions._experiment_reads import direct_samples, direct_slice
 
@@ -94,7 +94,7 @@ def line_column(top, bot, mu, i, w, budget_ids, colors, name, floor, bins):
 
 
 def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_lines, case_dir,
-                      floor=1e-2, bins=30):
+                      floor=0.0, bins=30):
     """One two-row figure: exact-plus-budget histogram on top, budget error below.
 
     Lines are ranked by E[|mu_l|], most-congested first; lines that never congest above
@@ -102,8 +102,7 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
     across lines and the bottom row shares its own (error), symmetric about zero, so the same
     error reads at the same height on every line."""
     idx, names = select_lines(mu, line_names, w, n=n_lines)
-    names = "ABCDE"
-    shown = list(zip(idx, names))
+    shown = list(zip(idx, [line_label(n) for n in names]))
     budget_ids = budget_first_rep_ids(samples, dist, budgets)
     colors = budget_colors(budgets)
     fig, axs, figh = fraction_grid(1, len(shown), head=0.13, foot=0.2)
@@ -117,7 +116,7 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
     axs[0, 0].set_ylabel("prob. mass", fontsize=FONT["axlabel"])
     #axs[1, 0].set_ylabel(r"$\Delta$ prob. mass", fontsize=FONT["axlabel"])
 
-    axs[0, 0].set_ylim(0, 0.6)
+    axs[0, 0].set_ylim(0, 0.7)
     bound = 0.05 #max(abs(v) for v in axs[1, 0].get_ylim()) * 1.5
     #axs[1, 0].set_ylim(-bound, bound)
     one_sigfig_yaxis(axs[0, 0])
@@ -136,7 +135,7 @@ def plot_distribution(case, samples, meta, mu, line_names, w, dist, budgets, n_l
     return fig
 
 
-def run(case, dists, budgets=None, n_lines=5, floor=1e-2, bins=30):
+def run(case, dists, budgets=None, n_lines=5, floor=0.0, bins=30):
     """One |mu_l| distribution-plus-error figure per nominal law; returns the figures in order."""
     c, samples, meta = direct_samples(case)
     case, case_dir = c.name, c.results_dir
@@ -159,8 +158,8 @@ def main():
     parser.add_argument("--n-lines", type=int, default=5,
                         help="number of most-congested lines to show per figure")
     parser.add_argument("--bins", type=int, default=20)
-    parser.add_argument("--floor", type=float, default=1e-2,
-                        help="drop lines that never congest above this |mu_l|")
+    parser.add_argument("--floor", type=float, default=0.0,
+                        help="lower bin edge; 0 includes the uncongested mass in the first bar")
     args = parser.parse_args()
 
     budgets = [int(b) for b in args.budgets.split(",")] if args.budgets else None

@@ -22,9 +22,25 @@ Curves (one line's whole distribution):
 Selection:
     order_lines        line indices and names by descending score (optional top-n)
     select_lines       the single filter-free selection: top lines by descending E[|mu_l|]
+    line_label         the fixed A-E panel label a contingency carries across figures
 """
 
 import numpy as np
+
+LINE_LABEL = {                       # contingency -> fixed panel letter, consistent across figures
+    "ctg:68:18": "A", "ctg:10:9": "B", "ctg:464:461": "C",
+    "ctg:10:90": "D", "ctg:320:481": "E",
+    "ctg:457:435": "F",              # the one top-5 levfull line not already in the paper's A-E
+}
+
+
+def line_label(name):
+    """The fixed panel label for a contingency (A-E), its own name when unlabeled.
+
+    The paper grids rank these five contingencies A-E on the enumerated case; keying the label
+    to the contingency keeps the same letter on the same line in every figure, even where a
+    different case ranks the lines in another order."""
+    return LINE_LABEL.get(name, name)
 
 
 def exceedance_prob(mu, w, threshold):

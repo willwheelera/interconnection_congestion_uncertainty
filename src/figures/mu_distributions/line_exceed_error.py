@@ -138,7 +138,7 @@ def decorate_grid(fig, handles, threshold, supy_x, legend_title=None, legend_bot
     #           title_fontsize=FONT["axlabel"], handletextpad=0.3, columnspacing=0.8,
     #           borderpad=0.3, handlelength=1.4)
     #fig.suptitle(title, y=1 - TITLE_IN / h, fontsize=FONT["suptitle"])
-    fig.supylabel(rf"$\hat{{P}}[\,|\mu_l| > {threshold:g}\,]$", x=supy_x, fontsize=FONT["axlabel"])
+    fig.supylabel(rf"${{P}}[\,|\mu_l| > {threshold:g}\,]$", x=supy_x, fontsize=FONT["axlabel"])
 
 
 def grid_legend():
@@ -163,7 +163,7 @@ def figure_lines_as_cols(frame, dorder, order_names, name_index, truths, budgets
                 panel_title(ax, f"{name}")
             if j == 0:
                 ax.set_ylabel(DIST_LABEL[d], fontsize=FONT["panel_title"])
-    fig.supxlabel("sampling budget", y=LABEL_IN / fig.get_figheight(), fontsize=FONT["axlabel"])
+    fig.supxlabel(r"Sampling budget $(10\times 4^n)$", y=LABEL_IN / fig.get_figheight(), fontsize=FONT["axlabel"])
     decorate_grid(fig, grid_legend(), threshold, supy_x=LABEL_IN / fig.get_figwidth() - 0.02)
     return fig
 
@@ -191,8 +191,8 @@ def figure_lines_as_rows(frame, dorder, order_names, name_index, truths, budgets
     fig.set_figheight(h)
     fig.subplots_adjust(left=LEFT_WIDE_IN / fig.get_figwidth(),
                         top=1 - TOP_WIDE_IN / h, bottom=BOTTOM_WIDE_IN / h)
-    fig.supxlabel("sampling budget", y=(LABEL_IN + 0.00) / h, fontsize=FONT["axlabel"])
-    decorate_grid(fig, grid_legend(), threshold, supy_x=LABEL_IN / fig.get_figwidth(),
+    fig.supxlabel(r"Sampling budget $(1\!0\times 4^n)$", y=(LABEL_IN - 0.03) / h, fontsize=FONT["axlabel"])
+    decorate_grid(fig, grid_legend(), threshold, supy_x=LABEL_IN / fig.get_figwidth() + 0.03,
                   legend_bottom=True)
     return fig
 

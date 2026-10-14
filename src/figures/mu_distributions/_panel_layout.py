@@ -19,7 +19,7 @@ from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 FIG_W = 7.0                       # total figure width, inches (two-column text-block limit)
 PANEL_ASPECT = 2.5 / 2.2          # margin_grid panel width / height
-MARGIN_IN = {"left": 0.42, "right": 0.06, "bottom": 0.32, "top": 0.34}   # decoration bands
+MARGIN_IN = {"left": 0.3, "right": 0.06, "bottom": 0.32, "top": 0.34}   # decoration bands
 TITLE_IN, LEGEND_IN = 0.04, 0.19  # inches from the top edge down to the title / legend top
 LABEL_IN = 0.03                   # inches from the bottom/left edge to the shared axis label
 PANEL_TITLE_Y = 0.96             # panel_title anchor: text top just below the panel's top border
@@ -71,16 +71,18 @@ def panel_title(ax, text, y=PANEL_TITLE_Y):
             fontsize=FONT["panel_title"])
 
 
-def margin_grid(nrow, ncol, sharey=False, aspect=PANEL_ASPECT, w=FIG_W, **kwargs):
+def margin_grid(nrow, ncol, sharey=False, sharex=True, aspect=PANEL_ASPECT, w=FIG_W, **kwargs):
     """Panel grid of fixed FIG_W width whose decoration margins are inches, not fractions.
 
     Panel width follows from the width left over after the margins; panel height follows
     from `aspect` (panel width / height), so the figure grows downward with the row count while
     the bands reserved for the suptitle, legend, and shared axis labels keep the same absolute
-    size.  A larger `aspect` gives shorter panels, squeezing the vertical extent of tall grids."""
+    size.  A larger `aspect` gives shorter panels, squeezing the vertical extent of tall grids.
+    `sharex` defaults to a single shared x axis; pass False when rows carry different x quantities
+    (e.g. a budget-indexed row above a price-valued row)."""
     panel_w = (w - MARGIN_IN["left"] - MARGIN_IN["right"]) / ncol
     h = nrow * panel_w / aspect + MARGIN_IN["top"] + MARGIN_IN["bottom"]
-    fig, axs = plt.subplots(nrow, ncol, figsize=(w, h), squeeze=False, sharex=True, sharey=sharey)
+    fig, axs = plt.subplots(nrow, ncol, figsize=(w, h), squeeze=False, sharex=sharex, sharey=sharey)
     adjust = dict(left=MARGIN_IN["left"] / w, right=1 - MARGIN_IN["right"] / w,
                   bottom=MARGIN_IN["bottom"] / h, top=1 - MARGIN_IN["top"] / h,
                   wspace=0.24, hspace=0.12)

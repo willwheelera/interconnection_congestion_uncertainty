@@ -134,7 +134,7 @@ def estimate_legend():
 def decorate_grid(fig, title, ylabel, supy_x, legend_bottom=False):
     """Shared legend, suptitle, and shared y label for either grid orientation."""
     h = fig.get_figheight()
-    loc, anchor = (("lower center", (0.5, LABEL_IN / h)) if legend_bottom
+    loc, anchor = (("lower center", (0.5, LABEL_IN / h - 0.02)) if legend_bottom
                    else ("upper center", (0.5, 1 - LEGEND_IN / h)))
     fig.legend(handles=estimate_legend(), loc=loc, bbox_to_anchor=anchor, ncol=3,
                frameon=True, fontsize=FONT["legend"], handletextpad=0.3, columnspacing=0.8,
@@ -154,7 +154,7 @@ def figure_lines_as_cols(est, dists, order_idx, order_names, truths, ranges, yla
                 panel_title(axs[i, j], f"line {order_names[j]}")
             if j == 0:
                 axs[i, j].set_ylabel(DIST_LABEL[d], fontsize=FONT["panel_title"], labelpad=2)
-    fig.supxlabel("No. top configs averaged",
+    fig.supxlabel("Number of top configs averaged",
                   y=LABEL_IN / fig.get_figheight(), fontsize=FONT["axlabel"])
     decorate_grid(fig, title, ylabel, supy_x=0.012)
     return fig
@@ -177,8 +177,8 @@ def figure_lines_as_rows(est, dists, order_idx, order_names, truths, ranges, yla
     fig.set_figheight(h)
     fig.subplots_adjust(left=LEFT_WIDE_IN / fig.get_figwidth(),
                         top=1 - TOP_WIDE_IN / h, bottom=BOTTOM_WIDE_IN / h)
-    fig.supxlabel("No. top configs averaged",
-                  y=(LABEL_IN + 0.26) / h, fontsize=FONT["axlabel"])
+    fig.supxlabel("Number of top configs averaged",
+                  y=(LABEL_IN + 0.23) / h, fontsize=FONT["axlabel"])
     decorate_grid(fig, title, ylabel, supy_x=LABEL_IN / fig.get_figwidth(), legend_bottom=True)
     return fig
 

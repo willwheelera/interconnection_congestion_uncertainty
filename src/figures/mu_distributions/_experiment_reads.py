@@ -9,9 +9,12 @@ raw parquet loaders they build on are in `sampling.problem`.
     direct_slice     the direct rows of one law/target/snapshot cell of a loaded frame
     load_slice       one (dist, target, snapshot, budget) cell of the exceedance curves
     select_series    keep the curve series whose method is in the requested selection
+    read_dual_samples  the wide per-line |mu| MCMC draw table of a sample-only case
+    read_modal_point   per-line |mu| of that case's most-probable config
 """
 
 import numpy as np
+import pandas as pd
 import pyarrow.dataset as pads
 
 from src.cases.registry import get_case
@@ -70,3 +73,22 @@ def select_series(series, methods):
     """Keep only the curve series whose method is in the requested selection."""
     keep = set(select_methods({m for m, _ in series}, methods))
     return {key: est for key, est in series.items() if key[0] in keep}
+
+
+def read_dual_samples(case, law):
+    """The wide per-line |mu| MCMC draw table (nsamples x nline) and its line names.
+
+    The sample-only (ngen ~ 195) analogue of `direct_samples`: that case has no exact table,
+    only the draws in results/<case>/mcmc/<law>/dual_samples.parquet.  `case` is a resolved
+    Case; returns |mu| as a dense (nsamples, nline) array and the line names from its columns.
+    """
+    df = pd.read_parquet(case.results_dir / "mcmc" / law / "dual_samples.parquet")
+    return np.abs(df["mu"].to_numpy()), list(df["mu"].columns)
+
+
+def read_modal_point(case, law):
+    """Per-constraint |mu| of the most-probable config from modal_point.parquet, {} if absent."""
+    path = case.results_dir / "mcmc" / law / "modal_point.parquet"
+    if not path.exists():
+        return {}
+    return {c: float(v) for c, v in pd.read_parquet(path)["mu"].iloc[0].items()}
